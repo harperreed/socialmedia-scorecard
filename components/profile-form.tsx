@@ -7,17 +7,17 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ProfileResult } from "@/components/profile-result";
 
-// Define type for crawler results
+// Define types for crawler results
+import type { ProfileData } from "@/components/profile-result";
+
 type CrawlerResult = {
-  [url: string]: {
-    fakeData: string;
-    [key: string]: any;
-  };
+  [url: string]: ProfileData;
 };
 
-// Define type for profile data
-type ProfileData = {
+// Define type for profile API response
+type ProfileResponse = {
   urls: string[];
   results: CrawlerResult;
   timestamp?: string;
@@ -47,7 +47,7 @@ export function ProfileForm() {
       const response = await fetch(`http://localhost:5000/profiles/${id}`);
       
       if (response.ok) {
-        const data: ProfileData = await response.json();
+        const data: ProfileResponse = await response.json();
         
         // Update state with the stored data
         if (data.results) {
@@ -266,18 +266,11 @@ export function ProfileForm() {
       {results && (
         <Card className="w-full max-w-md mx-auto">
           <CardHeader>
-            <CardTitle>Crawler Results</CardTitle>
+            <CardTitle>Privacy Analysis Results</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {Object.entries(results).map(([url, data]) => (
-              <Alert key={url}>
-                <AlertTitle className="text-sm font-medium truncate">{url}</AlertTitle>
-                <AlertDescription>
-                  <pre className="mt-2 w-full overflow-auto text-xs p-2 bg-muted rounded-md">
-                    {JSON.stringify(data, null, 2)}
-                  </pre>
-                </AlertDescription>
-              </Alert>
+              <ProfileResult key={url} url={url} data={data as any} />
             ))}
           </CardContent>
         </Card>

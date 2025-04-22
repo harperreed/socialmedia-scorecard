@@ -57,11 +57,14 @@ def test_profiles_endpoint_with_crawler():
     assert "results" in response_data
     assert len(response_data["results"]) == 2
     
-    # Check that each URL has a result with fakeData
+    # Check that each URL has the expected structured result
     for url in urls:
         assert url in response_data["results"]
-        assert "fakeData" in response_data["results"][url]
-        assert response_data["results"][url]["fakeData"] == f"mocked for {url}"
+        assert "platform" in response_data["results"][url]
+        assert "username" in response_data["results"][url]
+        assert "privacy_settings" in response_data["results"][url]
+        assert "activity_data" in response_data["results"][url]
+        assert "risk_assessment" in response_data["results"][url]
 
 def test_profiles_endpoint_with_provided_user_id():
     # Create a test client
@@ -118,7 +121,10 @@ def test_get_profiles_endpoint():
     # Verify the results content
     for url in urls:
         assert url in get_data["results"]
-        assert "fakeData" in get_data["results"][url]
+        assert "platform" in get_data["results"][url]
+        assert "privacy_settings" in get_data["results"][url]
+        assert "activity_data" in get_data["results"][url]
+        assert "risk_assessment" in get_data["results"][url]
 
 def test_get_profiles_with_nonexistent_user_id():
     # Create a test client
