@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,11 +16,67 @@ type CrawlerResult = {
   };
 };
 
+// Define type for profile data
+type ProfileData = {
+  urls: string[];
+  results: CrawlerResult;
+  timestamp?: string;
+};
+
 export function ProfileForm() {
   const [urls, setUrls] = useState<string[]>([""]);
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<CrawlerResult | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isLoadingStoredData, setIsLoadingStoredData] = useState(false);
   const { toast } = useToast();
+
+  // On component mount, check for a stored user_id
+  useEffect(() => {
+    const storedUserId = localStorage.getItem("fiasco_user_id");
+    if (storedUserId) {
+      setUserId(storedUserId);
+      fetchStoredData(storedUserId);
+    }
+  }, []);
+
+  // Fetch any stored data if user_id exists
+  const fetchStoredData = async (id: string) => {
+    setIsLoadingStoredData(true);
+    try {
+      const response = await fetch(`http://localhost:5000/profiles/${id}`);
+      
+      if (response.ok) {
+        const data: ProfileData = await response.json();
+        
+        // Update state with the stored data
+        if (data.results) {
+          setResults(data.results);
+          
+          // If there are URLs in the stored data, use them
+          if (data.urls && data.urls.length > 0) {
+            setUrls(data.urls);
+          }
+          
+          toast({
+            title: "Data loaded",
+            description: "Loaded your previously analyzed profiles",
+          });
+        }
+      } else if (response.status !== 404) {
+        // If not a 404 (no data found yet), show an error
+        toast({
+          title: "Error",
+          description: "Failed to load previously analyzed profiles",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching stored data:", error);
+    } finally {
+      setIsLoadingStoredData(false);
+    }
+  };
 
   // Handle input change for each URL field
   const handleUrlChange = (index: number, value: string) => {
@@ -46,6 +102,19 @@ export function ProfileForm() {
   const handleReset = () => {
     setUrls([""]);
     setResults(null);
+    
+    // Optionally clear the stored user_id to start fresh
+    if (userId) {
+      const shouldClear = window.confirm("Do you want to clear your saved data and start fresh?");
+      if (shouldClear) {
+        localStorage.removeItem("fiasco_user_id");
+        setUserId(null);
+        toast({
+          title: "Data cleared",
+          description: "Your saved data has been cleared",
+        });
+      }
+    }
   };
 
   // Handle form submission
@@ -70,12 +139,18 @@ export function ProfileForm() {
     setIsLoading(true);
 
     try {
+      // Include user_id if we have one from previous requests
+      const requestData = {
+        urls: validUrls,
+        ...(userId ? { user_id: userId } : {})
+      };
+
       const response = await fetch("http://localhost:5000/profiles", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ urls: validUrls }),
+        body: JSON.stringify(requestData),
       });
 
       const data = await response.json();
@@ -85,6 +160,12 @@ export function ProfileForm() {
           title: "Success",
           description: `Processed ${data.urls.length} profile URLs`,
         });
+        
+        // Store the user_id if it's new
+        if (data.user_id && (!userId || userId !== data.user_id)) {
+          localStorage.setItem("fiasco_user_id", data.user_id);
+          setUserId(data.user_id);
+        }
         
         // Store the results
         if (data.results) {
@@ -112,6 +193,11 @@ export function ProfileForm() {
           <CardTitle>Submit Profiles</CardTitle>
           <CardDescription>
             Enter the URLs of the social media profiles you want to analyze
+            {userId && 
+              <div className="mt-2 text-xs text-muted-foreground">
+                Session ID: {userId}
+              </div>
+            }
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -127,7 +213,7 @@ export function ProfileForm() {
                     placeholder="https://twitter.com/username"
                     value={url}
                     onChange={(e) => handleUrlChange(index, e.target.value)}
-                    disabled={isLoading}
+                    disabled={isLoading || isLoadingStoredData}
                   />
                 </div>
                 {urls.length > 1 && (
@@ -136,7 +222,7 @@ export function ProfileForm() {
                     variant="outline"
                     size="icon"
                     onClick={() => removeUrlField(index)}
-                    disabled={isLoading}
+                    disabled={isLoading || isLoadingStoredData}
                     aria-label="Remove URL"
                   >
                     &times;
@@ -148,22 +234,26 @@ export function ProfileForm() {
               type="button"
               variant="outline"
               onClick={addUrlField}
-              disabled={isLoading}
+              disabled={isLoading || isLoadingStoredData}
               className="w-full"
             >
               Add Another URL
             </Button>
           </CardContent>
           <CardFooter className="flex gap-2">
-            <Button type="submit" disabled={isLoading} className="flex-1">
-              {isLoading ? "Processing..." : "Analyze Profiles"}
+            <Button 
+              type="submit" 
+              disabled={isLoading || isLoadingStoredData} 
+              className="flex-1"
+            >
+              {isLoading ? "Processing..." : isLoadingStoredData ? "Loading..." : "Analyze Profiles"}
             </Button>
-            {results && (
+            {(results || userId) && (
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={handleReset}
-                disabled={isLoading}
+                disabled={isLoading || isLoadingStoredData}
               >
                 Reset
               </Button>
