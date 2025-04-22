@@ -5,15 +5,30 @@ Tests for the Flask API with mocked crawler functionality.
 import pytest
 import json
 from unittest.mock import patch, MagicMock
-from app import app as flask_app, crawler_results
+from app import app as flask_app, crawler_results, db
+from models import User, Profile
 
 @pytest.fixture
 def app():
+    # Configure the app for testing
+    flask_app.config['TESTING'] = True
+    # Use an in-memory SQLite database for testing
+    flask_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
     return flask_app
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    # Create a test client
+    test_client = app.test_client()
+    
+    # Create an application context
+    with app.app_context():
+        # Create all tables in the test database
+        db.create_all()
+        yield test_client
+        # Clean up after the test
+        db.session.remove()
+        db.drop_all()
 
 @pytest.fixture(autouse=True)
 def clear_crawler_results():

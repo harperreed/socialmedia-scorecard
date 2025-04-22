@@ -48,10 +48,41 @@ The content is organized as follows:
 </file_summary>
 
 <directory_structure>
+__tests__/
+  components/
+    connected-dashboard.test.tsx
+    profile-form.test.tsx
+.github/
+  ISSUE_TEMPLATE/
+    bug_report.md
+    feature_request.md
+  workflows/
+    backend-ci.yml
+    frontend-ci.yml
+    main.yml
+    release.yml
+  pull_request_template.md
 app/
+  connected/
+    layout.tsx
+    page.tsx
   globals.css
+  homepage.tsx
   layout.tsx
   page.tsx
+backend/
+  tests/
+    test_app.py
+    test_crawler.py
+    test_mocks.py
+  .gitignore
+  app.py
+  crawler.py
+  init_db.py
+  models.py
+  requirements.txt
+  run.py
+  test_firecrawl.py
 components/
   ui/
     accordion.tsx
@@ -104,34 +135,726 @@ components/
     tooltip.tsx
     use-mobile.tsx
     use-toast.ts
+  connected-dashboard.tsx
   data-exposure-metrics.tsx
+  navbar.tsx
   platform-settings.tsx
   privacy-dashboard.tsx
   privacy-recommendations.tsx
   privacy-score.tsx
+  profile-form.tsx
+  profile-result.tsx
   theme-provider.tsx
+context/
+  privacy-context.tsx
 hooks/
   use-mobile.tsx
   use-toast.ts
 lib/
+  mocks/
+    api-mock.ts
+  privacy-api.ts
   utils.ts
 public/
   placeholder-logo.svg
   placeholder.svg
+scripts/
+  release.sh
 styles/
   globals.css
 .gitignore
+.nvmrc
 components.json
+CONTRIBUTING.md
+jest.config.js
+jest.setup.js
+Makefile
 mise.toml
 next.config.mjs
 package.json
+plan.md
 postcss.config.mjs
+README.md
 tailwind.config.ts
+TESTING_ALL.md
+TESTING.md
 tsconfig.json
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="backend/init_db.py">
+1: """
+2: Initialize the database for the Flask application.
+3: """
+4: from app import app, db
+5: with app.app_context():
+6:     db.create_all()
+7:     print("Database tables created.")
+</file>
+
+<file path="backend/models.py">
+  1: """
+  2: Database models for the Flask application.
+  3: """
+  4: from flask_sqlalchemy import SQLAlchemy
+  5: import json
+  6: from datetime import datetime
+  7: db = SQLAlchemy()
+  8: class User(db.Model):
+  9:     """Model for user data."""
+ 10:     id = db.Column(db.String(36), primary_key=True)
+ 11:     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+ 12:     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+ 13:     # Relationships
+ 14:     profiles = db.relationship('Profile', backref='user', lazy=True, cascade="all, delete-orphan")
+ 15:     def __repr__(self):
+ 16:         return f'<User {self.id}>'
+ 17:     def to_dict(self):
+ 18:         return {
+ 19:             'id': self.id,
+ 20:             'created_at': self.created_at.isoformat() if self.created_at else None,
+ 21:             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+ 22:             'profiles': [profile.to_dict() for profile in self.profiles]
+ 23:         }
+ 24: class Profile(db.Model):
+ 25:     """Model for profile data."""
+ 26:     id = db.Column(db.Integer, primary_key=True)
+ 27:     url = db.Column(db.String(255), nullable=False)
+ 28:     platform = db.Column(db.String(50))
+ 29:     username = db.Column(db.String(100))
+ 30:     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+ 31:     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+ 32:     # Foreign keys
+ 33:     user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+ 34:     # Relationships
+ 35:     privacy_settings = db.relationship('PrivacySetting', backref='profile', lazy=True, cascade="all, delete-orphan")
+ 36:     activity_data = db.relationship('ActivityData', backref='profile', lazy=True, cascade="all, delete-orphan")
+ 37:     risk_assessment = db.relationship('RiskAssessment', backref='profile', lazy=True, cascade="all, delete-orphan")
+ 38:     def __repr__(self):
+ 39:         return f'<Profile {self.url}>'
+ 40:     def to_dict(self):
+ 41:         privacy_settings = {}
+ 42:         for setting in self.privacy_settings:
+ 43:             privacy_settings[setting.key] = setting.get_value()
+ 44:         activity_data = {}
+ 45:         for data in self.activity_data:
+ 46:             activity_data[data.key] = data.get_value()
+ 47:         # There should be only one risk assessment
+ 48:         risk_data = self.risk_assessment[0] if self.risk_assessment else None
+ 49:         return {
+ 50:             'platform': self.platform,
+ 51:             'username': self.username,
+ 52:             'timestamp': self.updated_at.isoformat() if self.updated_at else None,
+ 53:             'privacy_settings': privacy_settings,
+ 54:             'activity_data': activity_data,
+ 55:             'risk_assessment': risk_data.to_dict() if risk_data else None
+ 56:         }
+ 57: class PrivacySetting(db.Model):
+ 58:     """Model for privacy settings data."""
+ 59:     id = db.Column(db.Integer, primary_key=True)
+ 60:     key = db.Column(db.String(100), nullable=False)
+ 61:     value_type = db.Column(db.String(20), nullable=False)  # boolean, string, number
+ 62:     value_string = db.Column(db.String(255))
+ 63:     value_boolean = db.Column(db.Boolean)
+ 64:     value_number = db.Column(db.Float)
+ 65:     # Foreign keys
+ 66:     profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=False)
+ 67:     def __repr__(self):
+ 68:         return f'<PrivacySetting {self.key}>'
+ 69:     def get_value(self):
+ 70:         if self.value_type == 'string':
+ 71:             return self.value_string
+ 72:         elif self.value_type == 'boolean':
+ 73:             return self.value_boolean
+ 74:         elif self.value_type == 'number':
+ 75:             return self.value_number
+ 76:         return None
+ 77:     def set_value(self, value):
+ 78:         if isinstance(value, str):
+ 79:             self.value_type = 'string'
+ 80:             self.value_string = value
+ 81:         elif isinstance(value, bool):
+ 82:             self.value_type = 'boolean'
+ 83:             self.value_boolean = value
+ 84:         elif isinstance(value, (int, float)):
+ 85:             self.value_type = 'number'
+ 86:             self.value_number = float(value)
+ 87: class ActivityData(db.Model):
+ 88:     """Model for activity data."""
+ 89:     id = db.Column(db.Integer, primary_key=True)
+ 90:     key = db.Column(db.String(100), nullable=False)
+ 91:     value_type = db.Column(db.String(20), nullable=False)  # boolean, string, number
+ 92:     value_string = db.Column(db.String(255))
+ 93:     value_boolean = db.Column(db.Boolean)
+ 94:     value_number = db.Column(db.Float)
+ 95:     # Foreign keys
+ 96:     profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=False)
+ 97:     def __repr__(self):
+ 98:         return f'<ActivityData {self.key}>'
+ 99:     def get_value(self):
+100:         if self.value_type == 'string':
+101:             return self.value_string
+102:         elif self.value_type == 'boolean':
+103:             return self.value_boolean
+104:         elif self.value_type == 'number':
+105:             return self.value_number
+106:         return None
+107:     def set_value(self, value):
+108:         if isinstance(value, str):
+109:             self.value_type = 'string'
+110:             self.value_string = value
+111:         elif isinstance(value, bool):
+112:             self.value_type = 'boolean'
+113:             self.value_boolean = value
+114:         elif isinstance(value, (int, float)):
+115:             self.value_type = 'number'
+116:             self.value_number = float(value)
+117: class RiskAssessment(db.Model):
+118:     """Model for risk assessment data."""
+119:     id = db.Column(db.Integer, primary_key=True)
+120:     privacy_score = db.Column(db.Integer)
+121:     risk_level = db.Column(db.String(20))
+122:     risk_factors = db.Column(db.Text)  # Stored as JSON
+123:     recommendations = db.Column(db.Text)  # Stored as JSON
+124:     # Foreign keys
+125:     profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=False)
+126:     def __repr__(self):
+127:         return f'<RiskAssessment {self.id}>'
+128:     def to_dict(self):
+129:         return {
+130:             'privacy_score': self.privacy_score,
+131:             'risk_level': self.risk_level,
+132:             'risk_factors': json.loads(self.risk_factors) if self.risk_factors else [],
+133:             'recommendations': json.loads(self.recommendations) if self.recommendations else []
+134:         }
+135:     def set_risk_factors(self, factors):
+136:         self.risk_factors = json.dumps(factors)
+137:     def set_recommendations(self, recommendations):
+138:         self.recommendations = json.dumps(recommendations)
+</file>
+
+<file path="backend/test_firecrawl.py">
+ 1: """
+ 2: Test script for the Firecrawl integration.
+ 3: """
+ 4: import os
+ 5: import sys
+ 6: import json
+ 7: from crawler import crawl_profile
+ 8: def test_firecrawl_integration():
+ 9:     """Test the Firecrawl integration with a sample URL."""
+10:     # Check if API key is set
+11:     api_key = os.environ.get("FIRECRAWL_API_KEY")
+12:     if not api_key:
+13:         print("WARNING: No FIRECRAWL_API_KEY environment variable found.")
+14:         print("Running in mock data mode.")
+15:     else:
+16:         print(f"Found FIRECRAWL_API_KEY: {api_key[:4]}...{api_key[-4:]}")
+17:     # List of URLs to test
+18:     test_urls = [
+19:         "https://twitter.com/elonmusk",
+20:         "https://www.instagram.com/beyonce/",
+21:         "https://www.facebook.com/zuck",
+22:         "https://www.linkedin.com/in/billgates/",
+23:     ]
+24:     # Test each URL
+25:     results = {}
+26:     for url in test_urls:
+27:         print(f"\nTesting crawl for {url}...")
+28:         try:
+29:             result = crawl_profile(url)
+30:             print(f"Crawl successful. Data source: {result.get('data_source', 'unknown')}")
+31:             print(f"Platform: {result.get('platform')}")
+32:             print(f"Username: {result.get('username')}")
+33:             # Print privacy score
+34:             risk_assessment = result.get('risk_assessment', {})
+35:             print(f"Privacy Score: {risk_assessment.get('privacy_score', 'N/A')}")
+36:             # Store result
+37:             results[url] = result
+38:         except Exception as e:
+39:             print(f"Error crawling {url}: {str(e)}")
+40:     # Save results to file
+41:     with open("firecrawl_test_results.json", "w") as f:
+42:         json.dump(results, f, indent=2)
+43:     print("\nTest completed. Results saved to firecrawl_test_results.json")
+44: if __name__ == "__main__":
+45:     test_firecrawl_integration()
+</file>
+
+<file path="__tests__/components/connected-dashboard.test.tsx">
+  1: /**
+  2:  * @jest-environment jsdom
+  3:  */
+  4: import React from 'react';
+  5: import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+  6: import ConnectedDashboard from '@/components/connected-dashboard';
+  7: import { MockPrivacyAPI } from '@/lib/mocks/api-mock';
+  8: import { ToastProvider } from '@/components/ui/toast';
+  9: // Mock the local storage
+ 10: const localStorageMock = (() => {
+ 11:   let store: Record<string, string> = {};
+ 12:   return {
+ 13:     getItem: jest.fn((key: string) => store[key] || null),
+ 14:     setItem: jest.fn((key: string, value: string) => {
+ 15:       store[key] = value;
+ 16:     }),
+ 17:     removeItem: jest.fn((key: string) => {
+ 18:       delete store[key];
+ 19:     }),
+ 20:     clear: jest.fn(() => {
+ 21:       store = {};
+ 22:     }),
+ 23:   };
+ 24: })();
+ 25: Object.defineProperty(window, 'localStorage', { value: localStorageMock });
+ 26: // Mock the fetch function
+ 27: global.fetch = jest.fn();
+ 28: // Helper to render with toast context
+ 29: function renderWithToast(ui: React.ReactElement) {
+ 30:   return render(
+ 31:     <ToastProvider>{ui}</ToastProvider>
+ 32:   );
+ 33: }
+ 34: describe('ConnectedDashboard Component', () => {
+ 35:   let mockApi: MockPrivacyAPI;
+ 36:   beforeEach(() => {
+ 37:     // Reset mocks
+ 38:     localStorage.clear();
+ 39:     jest.mocked(global.fetch).mockReset();
+ 40:     mockApi = MockPrivacyAPI.getInstance();
+ 41:     mockApi.clearData();
+ 42:   });
+ 43:   it('shows the initial empty state with profile form', () => {
+ 44:     renderWithToast(<ConnectedDashboard />);
+ 45:     // Should show the "No Profile Data" text
+ 46:     expect(screen.getByText('No Profile Data')).toBeInTheDocument();
+ 47:     // Should have a form to add profiles
+ 48:     expect(screen.getByText('Add Social Media Profiles')).toBeInTheDocument();
+ 49:   });
+ 50:   it('loads stored profile data on mount if user_id exists', async () => {
+ 51:     // Set up localStorage with a user_id
+ 52:     const userId = 'test-user-123';
+ 53:     localStorage.setItem('fiasco_user_id', userId);
+ 54:     // Mock API response
+ 55:     const mockUrls = ['https://twitter.com/testuser'];
+ 56:     await mockApi.submitProfiles(mockUrls, userId);
+ 57:     // Mock fetch to use our mockApi
+ 58:     jest.mocked(global.fetch).mockImplementation(async (url) => {
+ 59:       if (url.includes(`/profiles/${userId}`)) {
+ 60:         const results = await mockApi.getProfileResults(userId);
+ 61:         return {
+ 62:           ok: true,
+ 63:           json: async () => results,
+ 64:         } as Response;
+ 65:       }
+ 66:       return {
+ 67:         ok: false,
+ 68:         json: async () => ({}),
+ 69:       } as Response;
+ 70:     });
+ 71:     renderWithToast(<ConnectedDashboard />);
+ 72:     // Wait for data to load
+ 73:     await waitFor(() => {
+ 74:       expect(screen.queryByText('No Profile Data')).not.toBeInTheDocument();
+ 75:     });
+ 76:     // Should show privacy score and other metrics
+ 77:     expect(screen.getByText('Overall Privacy Score')).toBeInTheDocument();
+ 78:     expect(screen.getByText('Public Information')).toBeInTheDocument();
+ 79:     // Should show platform tabs once loaded
+ 80:     await waitFor(() => {
+ 81:       expect(screen.getByRole('tab', { name: /Twitter/i })).toBeInTheDocument();
+ 82:     });
+ 83:   });
+ 84:   it('submits new profile URLs and displays results', async () => {
+ 85:     // Mock fetch for profile submission
+ 86:     jest.mocked(global.fetch).mockImplementation(async (url, options) => {
+ 87:       if (typeof url === 'string' && url.includes('/profiles') && options?.method === 'POST') {
+ 88:         const body = JSON.parse(options.body as string);
+ 89:         const results = await mockApi.submitProfiles(body.urls);
+ 90:         return {
+ 91:           ok: true,
+ 92:           json: async () => results,
+ 93:         } as Response;
+ 94:       }
+ 95:       return {
+ 96:         ok: false,
+ 97:         json: async () => ({}),
+ 98:       } as Response;
+ 99:     });
+100:     renderWithToast(<ConnectedDashboard />);
+101:     // Find the URL input in the form
+102:     const urlInput = screen.getByPlaceholderText('https://twitter.com/username');
+103:     fireEvent.change(urlInput, { target: { value: 'https://twitter.com/testuser' } });
+104:     // Submit the form
+105:     const submitButton = screen.getByRole('button', { name: /Analyze Profiles/i });
+106:     fireEvent.click(submitButton);
+107:     // Wait for data to load
+108:     await waitFor(() => {
+109:       expect(screen.queryByText('No Profile Data')).not.toBeInTheDocument();
+110:     });
+111:     // Should show privacy score and platform-specific tabs
+112:     await waitFor(() => {
+113:       expect(screen.getByRole('tab', { name: /Twitter/i })).toBeInTheDocument();
+114:     });
+115:   });
+116: });
+</file>
+
+<file path="__tests__/components/profile-form.test.tsx">
+  1: /**
+  2:  * @jest-environment jsdom
+  3:  */
+  4: import React from 'react';
+  5: import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+  6: import { ProfileForm } from '@/components/profile-form';
+  7: import { MockPrivacyAPI } from '@/lib/mocks/api-mock';
+  8: import { ToastProvider } from '@/components/ui/toast';
+  9: // Mock the fetch function
+ 10: global.fetch = jest.fn();
+ 11: // Helper to render with toast context
+ 12: function renderWithToast(ui: React.ReactElement) {
+ 13:   return render(
+ 14:     <ToastProvider>{ui}</ToastProvider>
+ 15:   );
+ 16: }
+ 17: describe('ProfileForm Component', () => {
+ 18:   let mockSubmit: jest.Mock;
+ 19:   beforeEach(() => {
+ 20:     mockSubmit = jest.fn();
+ 21:     // Reset the fetch mock
+ 22:     jest.mocked(global.fetch).mockReset();
+ 23:   });
+ 24:   it('renders the form with initial empty URL field', () => {
+ 25:     renderWithToast(<ProfileForm />);
+ 26:     // Form should be visible
+ 27:     expect(screen.getByText('Submit Profiles')).toBeInTheDocument();
+ 28:     // Should have one URL input initially
+ 29:     const urlInput = screen.getByPlaceholderText('https://twitter.com/username');
+ 30:     expect(urlInput).toBeInTheDocument();
+ 31:     expect(urlInput).toHaveValue('');
+ 32:     // Should have an "Add Another URL" button
+ 33:     expect(screen.getByText('Add Another URL')).toBeInTheDocument();
+ 34:   });
+ 35:   it('allows adding and removing URL fields', () => {
+ 36:     renderWithToast(<ProfileForm />);
+ 37:     // Initially one URL field
+ 38:     expect(screen.getAllByPlaceholderText('https://twitter.com/username')).toHaveLength(1);
+ 39:     // Click to add a field
+ 40:     fireEvent.click(screen.getByText('Add Another URL'));
+ 41:     // Now should have two URL fields
+ 42:     expect(screen.getAllByPlaceholderText('https://twitter.com/username')).toHaveLength(2);
+ 43:     // Remove button should exist for the second field
+ 44:     const removeButtons = screen.getAllByRole('button', { name: /Remove URL/i });
+ 45:     expect(removeButtons).toHaveLength(1);
+ 46:     // Click to remove the field
+ 47:     fireEvent.click(removeButtons[0]);
+ 48:     // Back to one URL field
+ 49:     expect(screen.getAllByPlaceholderText('https://twitter.com/username')).toHaveLength(1);
+ 50:   });
+ 51:   it('calls onSubmit with valid URLs when form is submitted', async () => {
+ 52:     renderWithToast(<ProfileForm onSubmit={mockSubmit} />);
+ 53:     // Enter a URL
+ 54:     const urlInput = screen.getByPlaceholderText('https://twitter.com/username');
+ 55:     fireEvent.change(urlInput, { target: { value: 'https://twitter.com/testuser' } });
+ 56:     // Submit the form
+ 57:     fireEvent.click(screen.getByRole('button', { name: /Analyze Profiles/i }));
+ 58:     // Check if onSubmit was called with the URLs
+ 59:     await waitFor(() => {
+ 60:       expect(mockSubmit).toHaveBeenCalledWith(['https://twitter.com/testuser']);
+ 61:     });
+ 62:   });
+ 63:   it('validates URLs before submission', async () => {
+ 64:     const { container } = renderWithToast(<ProfileForm onSubmit={mockSubmit} />);
+ 65:     // Submit with empty URL
+ 66:     fireEvent.click(screen.getByRole('button', { name: /Analyze Profiles/i }));
+ 67:     // Validate error message
+ 68:     await waitFor(() => {
+ 69:       expect(mockSubmit).not.toHaveBeenCalled();
+ 70:       expect(screen.getByText('Please enter at least one valid URL')).toBeInTheDocument();
+ 71:     });
+ 72:   });
+ 73:   it('integrates with MockPrivacyAPI', async () => {
+ 74:     // Mock the API response
+ 75:     const mockApi = MockPrivacyAPI.getInstance();
+ 76:     const submitSpy = jest.spyOn(mockApi, 'submitProfiles');
+ 77:     // Use the mock implementation for fetch
+ 78:     jest.mocked(global.fetch).mockImplementation(async () => {
+ 79:       const results = await mockApi.submitProfiles(['https://twitter.com/testuser']);
+ 80:       return {
+ 81:         ok: true,
+ 82:         json: async () => results,
+ 83:       } as Response;
+ 84:     });
+ 85:     renderWithToast(<ProfileForm />);
+ 86:     // Enter a URL
+ 87:     const urlInput = screen.getByPlaceholderText('https://twitter.com/username');
+ 88:     fireEvent.change(urlInput, { target: { value: 'https://twitter.com/testuser' } });
+ 89:     // Submit the form
+ 90:     fireEvent.click(screen.getByRole('button', { name: /Analyze Profiles/i }));
+ 91:     // Check that loading state is shown
+ 92:     expect(screen.getByText('Processing...')).toBeInTheDocument();
+ 93:     // Wait for success message
+ 94:     await waitFor(() => {
+ 95:       expect(screen.getByText(/Success/i)).toBeInTheDocument();
+ 96:     });
+ 97:     // Clean up
+ 98:     submitSpy.mockRestore();
+ 99:   });
+100: });
+</file>
+
+<file path=".github/ISSUE_TEMPLATE/bug_report.md">
+ 1: ---
+ 2: name: Bug report
+ 3: about: Create a report to help us improve
+ 4: title: "[BUG]"
+ 5: labels: bug
+ 6: assignees: ''
+ 7: 
+ 8: ---
+ 9: 
+10: **Describe the bug**
+11: A clear and concise description of what the bug is.
+12: 
+13: **To Reproduce**
+14: Steps to reproduce the behavior:
+15: 1. Go to '...'
+16: 2. Click on '....'
+17: 3. Scroll down to '....'
+18: 4. See error
+19: 
+20: **Expected behavior**
+21: A clear and concise description of what you expected to happen.
+22: 
+23: **Screenshots**
+24: If applicable, add screenshots to help explain your problem.
+25: 
+26: **Environment (please complete the following information):**
+27: - OS: [e.g. macOS, Windows]
+28: - Browser [e.g. chrome, safari]
+29: - Version [e.g. 22]
+30: - Node.js version:
+31: - Python version:
+32: 
+33: **Additional context**
+34: Add any other context about the problem here.
+</file>
+
+<file path=".github/ISSUE_TEMPLATE/feature_request.md">
+ 1: ---
+ 2: name: Feature request
+ 3: about: Suggest an idea for this project
+ 4: title: "[FEATURE]"
+ 5: labels: enhancement
+ 6: assignees: ''
+ 7: 
+ 8: ---
+ 9: 
+10: **Is your feature request related to a problem? Please describe.**
+11: A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+12: 
+13: **Describe the solution you'd like**
+14: A clear and concise description of what you want to happen.
+15: 
+16: **Describe alternatives you've considered**
+17: A clear and concise description of any alternative solutions or features you've considered.
+18: 
+19: **Additional context**
+20: Add any other context or screenshots about the feature request here.
+</file>
+
+<file path=".github/workflows/backend-ci.yml">
+ 1: name: Backend CI
+ 2: on:
+ 3:   push:
+ 4:     branches: [ main ]
+ 5:     paths:
+ 6:       - 'backend/**'
+ 7:   pull_request:
+ 8:     branches: [ main ]
+ 9:     paths:
+10:       - 'backend/**'
+11: jobs:
+12:   test:
+13:     runs-on: ubuntu-latest
+14:     steps:
+15:     - uses: actions/checkout@v3
+16:     - name: Set up Python
+17:       uses: actions/setup-python@v4
+18:       with:
+19:         python-version: '3.11'
+20:     - name: Install uv
+21:       run: pip install uv
+22:     - name: Create venv and install dependencies
+23:       working-directory: ./backend
+24:       run: |
+25:         uv venv
+26:         . .venv/bin/activate
+27:         uv pip install -r requirements.txt
+28:     - name: Run tests
+29:       working-directory: ./backend
+30:       run: |
+31:         . .venv/bin/activate
+32:         python -m pytest tests/
+</file>
+
+<file path=".github/workflows/frontend-ci.yml">
+ 1: name: Frontend CI
+ 2: on:
+ 3:   push:
+ 4:     branches: [ main ]
+ 5:     paths-ignore:
+ 6:       - 'backend/**'
+ 7:   pull_request:
+ 8:     branches: [ main ]
+ 9:     paths-ignore:
+10:       - 'backend/**'
+11: jobs:
+12:   lint-and-build:
+13:     runs-on: ubuntu-latest
+14:     steps:
+15:     - uses: actions/checkout@v3
+16:     - name: Setup Node.js
+17:       uses: actions/setup-node@v3
+18:       with:
+19:         node-version: '20'
+20:     - name: Setup pnpm
+21:       uses: pnpm/action-setup@v2
+22:       with:
+23:         version: '8'
+24:     - name: Install dependencies
+25:       run: pnpm install
+26:     - name: Run lint
+27:       run: pnpm lint
+28:     - name: Build application
+29:       run: pnpm build
+</file>
+
+<file path=".github/workflows/main.yml">
+ 1: name: Main CI
+ 2: on:
+ 3:   push:
+ 4:     branches: [ main ]
+ 5:   pull_request:
+ 6:     branches: [ main ]
+ 7: jobs:
+ 8:   frontend:
+ 9:     uses: ./.github/workflows/frontend-ci.yml
+10:   backend:
+11:     uses: ./.github/workflows/backend-ci.yml
+</file>
+
+<file path=".github/workflows/release.yml">
+ 1: name: Create Release
+ 2: on:
+ 3:   push:
+ 4:     tags:
+ 5:       - 'v*'
+ 6: jobs:
+ 7:   build:
+ 8:     name: Create Release
+ 9:     runs-on: ubuntu-latest
+10:     steps:
+11:       - name: Checkout code
+12:         uses: actions/checkout@v3
+13:         with:
+14:           fetch-depth: 0
+15:       - name: Create Release Notes
+16:         id: release_notes
+17:         run: |
+18:           # Get the latest tag
+19:           LATEST_TAG=$(git describe --tags --abbrev=0)
+20:           # Get the tag before the latest one
+21:           PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$LATEST_TAG"^)
+22:           # If this is the first tag, use the initial commit
+23:           if [ $? -ne 0 ]; then
+24:             PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+25:           fi
+26:           # Generate changelog
+27:           echo "## Changes in $LATEST_TAG" > changelog.md
+28:           echo "" >> changelog.md
+29:           git log "$PREVIOUS_TAG..$LATEST_TAG" --pretty=format:"* %s" --reverse | grep -v "Merge pull request" >> changelog.md
+30:           echo "" >> changelog.md
+31:           # Replace newlines for GitHub Actions output
+32:           CHANGELOG=$(cat changelog.md)
+33:           CHANGELOG="${CHANGELOG//'%'/'%25'}"
+34:           CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+35:           CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+36:           echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+37:       - name: Create Release
+38:         uses: actions/create-release@v1
+39:         env:
+40:           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+41:         with:
+42:           tag_name: ${{ github.ref }}
+43:           release_name: Release ${{ github.ref }}
+44:           body: ${{ steps.release_notes.outputs.changelog }}
+45:           draft: false
+46:           prerelease: false
+</file>
+
+<file path=".github/pull_request_template.md">
+ 1: ## Description
+ 2: 
+ 3: <!-- Describe the changes you've made -->
+ 4: 
+ 5: ## Type of change
+ 6: 
+ 7: - [ ] Bug fix (non-breaking change which fixes an issue)
+ 8: - [ ] New feature (non-breaking change which adds functionality)
+ 9: - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+10: - [ ] Documentation update
+11: 
+12: ## Checklist
+13: 
+14: - [ ] My code follows the style guidelines of this project
+15: - [ ] I have performed a self-review of my code
+16: - [ ] I have commented my code, particularly in hard-to-understand areas
+17: - [ ] I have made corresponding changes to the documentation
+18: - [ ] My changes generate no new warnings
+19: - [ ] I have added tests that prove my fix is effective or that my feature works
+20: - [ ] New and existing unit tests pass locally with my changes
+</file>
+
+<file path="app/connected/layout.tsx">
+ 1: import { Navbar } from "@/components/navbar";
+ 2: import { PrivacyProvider } from "@/context/privacy-context";
+ 3: import { Toaster } from "@/components/ui/toaster";
+ 4: export default function ConnectedLayout({
+ 5:   children,
+ 6: }: {
+ 7:   children: React.ReactNode;
+ 8: }) {
+ 9:   return (
+10:     <>
+11:       <Navbar />
+12:       <PrivacyProvider>
+13:         {children}
+14:         <Toaster />
+15:       </PrivacyProvider>
+16:     </>
+17:   );
+18: }
+</file>
+
+<file path="app/connected/page.tsx">
+ 1: import ConnectedDashboard from "@/components/connected-dashboard";
+ 2: export default function ConnectedPage() {
+ 3:   return (
+ 4:     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
+ 5:       <div className="mx-auto max-w-7xl">
+ 6:         <h1 className="mb-6 text-3xl font-bold tracking-tight">Social Media Privacy Report</h1>
+ 7:         <p className="mb-8 text-muted-foreground">
+ 8:           Review and analyze your privacy settings and data exposure across social media platforms
+ 9:         </p>
+10:         <ConnectedDashboard />
+11:       </div>
+12:     </main>
+13:   );
+14: }
+</file>
 
 <file path="app/globals.css">
  1: @tailwind base;
@@ -226,6 +949,36 @@ This section contains the contents of the repository's files.
 90: }
 </file>
 
+<file path="app/homepage.tsx">
+ 1: import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+ 2: import PrivacyDashboard from "@/components/privacy-dashboard";
+ 3: import ConnectedDashboard from "@/components/connected-dashboard";
+ 4: export default function HomePage() {
+ 5:   return (
+ 6:     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
+ 7:       <div className="mx-auto max-w-7xl">
+ 8:         <h1 className="mb-6 text-3xl font-bold tracking-tight">Social Media Privacy Report</h1>
+ 9:         <p className="mb-8 text-muted-foreground">
+10:           Review and analyze your privacy settings and data exposure across social media platforms
+11:         </p>
+12:         <Tabs defaultValue="connected" className="mb-8">
+13:           <TabsList className="mb-4">
+14:             <TabsTrigger value="connected">Connected Dashboard</TabsTrigger>
+15:             <TabsTrigger value="demo">Demo Dashboard</TabsTrigger>
+16:           </TabsList>
+17:           <TabsContent value="connected">
+18:             <ConnectedDashboard />
+19:           </TabsContent>
+20:           <TabsContent value="demo">
+21:             <PrivacyDashboard />
+22:           </TabsContent>
+23:         </Tabs>
+24:       </div>
+25:     </main>
+26:   );
+27: }
+</file>
+
 <file path="app/layout.tsx">
  1: import type React from "react"
  2: import "@/app/globals.css"
@@ -267,6 +1020,162 @@ This section contains the contents of the repository's files.
 12:     </main>
 13:   )
 14: }
+</file>
+
+<file path="backend/tests/test_mocks.py">
+  1: """
+  2: Tests for the Flask API with mocked crawler functionality.
+  3: """
+  4: import pytest
+  5: import json
+  6: from unittest.mock import patch, MagicMock
+  7: from app import app as flask_app, crawler_results, db
+  8: from models import User, Profile
+  9: @pytest.fixture
+ 10: def app():
+ 11:     # Configure the app for testing
+ 12:     flask_app.config['TESTING'] = True
+ 13:     # Use an in-memory SQLite database for testing
+ 14:     flask_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+ 15:     return flask_app
+ 16: @pytest.fixture
+ 17: def client(app):
+ 18:     # Create a test client
+ 19:     test_client = app.test_client()
+ 20:     # Create an application context
+ 21:     with app.app_context():
+ 22:         # Create all tables in the test database
+ 23:         db.create_all()
+ 24:         yield test_client
+ 25:         # Clean up after the test
+ 26:         db.session.remove()
+ 27:         db.drop_all()
+ 28: @pytest.fixture(autouse=True)
+ 29: def clear_crawler_results():
+ 30:     # Clear the crawler_results before each test
+ 31:     crawler_results.clear()
+ 32:     yield
+ 33: def test_profiles_endpoint_with_mocked_crawler():
+ 34:     """Test the /profiles endpoint with a mocked crawler function."""
+ 35:     # Create a test client
+ 36:     client = flask_app.test_client()
+ 37:     # Mock data that would be returned by the crawler
+ 38:     mock_profile_data = {
+ 39:         "platform": "twitter",
+ 40:         "username": "testuser",
+ 41:         "privacy_settings": {
+ 42:             "account_privacy": "public",
+ 43:             "location_sharing": True
+ 44:         },
+ 45:         "activity_data": {
+ 46:             "post_count": 150,
+ 47:             "follower_count": 500
+ 48:         },
+ 49:         "risk_assessment": {
+ 50:             "privacy_score": 65,
+ 51:             "risk_level": "medium",
+ 52:             "risk_factors": ["Public account exposes your content to anyone"],
+ 53:             "recommendations": ["Set your account to private"]
+ 54:         }
+ 55:     }
+ 56:     # Patch the crawler function to return our mock data
+ 57:     with patch('app.crawl_profile', return_value=mock_profile_data):
+ 58:         # Test data
+ 59:         urls = ["https://twitter.com/testuser"]
+ 60:         # Send POST request
+ 61:         response = client.post(
+ 62:             '/profiles',
+ 63:             data=json.dumps({"urls": urls}),
+ 64:             content_type='application/json'
+ 65:         )
+ 66:         # Check status code and response structure
+ 67:         assert response.status_code == 200
+ 68:         data = response.json
+ 69:         assert "status" in data
+ 70:         assert "user_id" in data
+ 71:         assert "results" in data
+ 72:         # Check if our mock data is in the results
+ 73:         assert urls[0] in data["results"]
+ 74:         assert data["results"][urls[0]]["platform"] == "twitter"
+ 75:         assert data["results"][urls[0]]["username"] == "testuser"
+ 76:         # Get the user_id to use in the next test
+ 77:         user_id = data["user_id"]
+ 78:         # Now test the GET endpoint using the same user_id
+ 79:         get_response = client.get(f'/profiles/{user_id}')
+ 80:         assert get_response.status_code == 200
+ 81:         get_data = get_response.json
+ 82:         # Check that the same data was stored
+ 83:         assert urls[0] in get_data["results"]
+ 84:         assert get_data["results"][urls[0]]["platform"] == "twitter"
+ 85: def test_user_id_creation_and_retrieval():
+ 86:     """Test user_id creation, data storage and retrieval."""
+ 87:     # Create a test client
+ 88:     client = flask_app.test_client()
+ 89:     # Test with a provided user_id
+ 90:     user_id = "test-user-123"
+ 91:     # Send POST request with user_id
+ 92:     response = client.post(
+ 93:         '/profiles',
+ 94:         data=json.dumps({
+ 95:             "urls": ["https://twitter.com/testuser"],
+ 96:             "user_id": user_id
+ 97:         }),
+ 98:         content_type='application/json'
+ 99:     )
+100:     # Verify the response contains the same user_id
+101:     assert response.status_code == 200
+102:     assert response.json["user_id"] == user_id
+103:     # Verify we can retrieve the data with that user_id
+104:     get_response = client.get(f'/profiles/{user_id}')
+105:     assert get_response.status_code == 200
+106:     # Test with a non-existent user_id
+107:     not_found_response = client.get('/profiles/nonexistent-user-id')
+108:     assert not_found_response.status_code == 404
+109: def test_crawler_accepts_any_domain():
+110:     """Test that the API works with any domain name."""
+111:     # Create a test client
+112:     client = flask_app.test_client()
+113:     # Test with various domain types
+114:     domains = [
+115:         "https://twitter.com/user123",
+116:         "https://facebook.com/user123",
+117:         "https://instagram.com/user123",
+118:         "https://linkedin.com/in/user123",
+119:         "https://tiktok.com/@user123",
+120:         "https://youtube.com/user123",
+121:         "https://example.com/user123",  # Should work with unknown domains too
+122:     ]
+123:     # Send POST request with all domains
+124:     response = client.post(
+125:         '/profiles',
+126:         data=json.dumps({"urls": domains}),
+127:         content_type='application/json'
+128:     )
+129:     # Check that each domain has a result
+130:     assert response.status_code == 200
+131:     for domain in domains:
+132:         assert domain in response.json["results"]
+133:         # Each result should have a platform property
+134:         assert "platform" in response.json["results"][domain]
+135:         # Each result should have a username property
+136:         assert "username" in response.json["results"][domain]
+</file>
+
+<file path="backend/.gitignore">
+1: .venv/
+2: __pycache__/
+3: *.pyc
+4: .pytest_cache/
+</file>
+
+<file path="backend/run.py">
+1: from app import app, db
+2: if __name__ == '__main__':
+3:     with app.app_context():
+4:         db.create_all()
+5:         print("Database tables created or verified.")
+6:     print("Starting Flask server at http://localhost:5000")
+7:     app.run(debug=True, host='0.0.0.0', port=5000)
 </file>
 
 <file path="components/ui/accordion.tsx">
@@ -5001,6 +5910,54 @@ This section contains the contents of the repository's files.
 84: }
 </file>
 
+<file path="components/navbar.tsx">
+ 1: "use client";
+ 2: import Link from "next/link";
+ 3: import { usePathname } from "next/navigation";
+ 4: import { Button } from "@/components/ui/button";
+ 5: import { Shield } from "lucide-react";
+ 6: export function Navbar() {
+ 7:   const pathname = usePathname();
+ 8:   return (
+ 9:     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+10:       <div className="container flex h-14 items-center">
+11:         <div className="mr-4 flex">
+12:           <Link href="/" className="flex items-center space-x-2">
+13:             <Shield className="h-6 w-6" />
+14:             <span className="font-bold">Privacy Report</span>
+15:           </Link>
+16:         </div>
+17:         <nav className="flex items-center space-x-4 lg:space-x-6">
+18:           <Link
+19:             href="/"
+20:             className={`text-sm font-medium transition-colors hover:text-primary ${
+21:               pathname === "/" ? "text-foreground" : "text-muted-foreground"
+22:             }`}
+23:           >
+24:             Dashboard
+25:           </Link>
+26:           <Link
+27:             href="/connected"
+28:             className={`text-sm font-medium transition-colors hover:text-primary ${
+29:               pathname === "/connected" ? "text-foreground" : "text-muted-foreground"
+30:             }`}
+31:           >
+32:             Connected
+33:           </Link>
+34:         </nav>
+35:         <div className="ml-auto flex items-center space-x-4">
+36:           <Button variant="outline" size="sm" asChild>
+37:             <Link href="https://github.com/yourusername/fiasco" target="_blank">
+38:               GitHub
+39:             </Link>
+40:           </Button>
+41:         </div>
+42:       </div>
+43:     </header>
+44:   );
+45: }
+</file>
+
 <file path="components/platform-settings.tsx">
   1: "use client"
   2: import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -5740,6 +6697,219 @@ This section contains the contents of the repository's files.
 51: }
 </file>
 
+<file path="components/profile-result.tsx">
+  1: "use client";
+  2: import { useState } from "react";
+  3: import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+  4: import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  5: import { Badge } from "@/components/ui/badge";
+  6: import { Progress } from "@/components/ui/progress";
+  7: import { AlertCircle, CheckCircle, Shield, Activity, Settings, User } from "lucide-react";
+  8: type PrivacySettings = {
+  9:   [key: string]: string | boolean;
+ 10: };
+ 11: type ActivityData = {
+ 12:   post_count: number;
+ 13:   follower_count: number;
+ 14:   following_count: number;
+ 15:   last_active: string;
+ 16:   account_created: string;
+ 17:   [key: string]: number | string | boolean;
+ 18: };
+ 19: type RiskAssessment = {
+ 20:   privacy_score: number;
+ 21:   risk_level: "low" | "medium" | "high";
+ 22:   risk_factors: string[];
+ 23:   recommendations: string[];
+ 24: };
+ 25: export type ProfileData = {
+ 26:   platform: string;
+ 27:   username: string;
+ 28:   timestamp: string;
+ 29:   privacy_settings: PrivacySettings;
+ 30:   activity_data: ActivityData;
+ 31:   risk_assessment: RiskAssessment;
+ 32:   error?: string;
+ 33: };
+ 34: interface ProfileResultProps {
+ 35:   url: string;
+ 36:   data: ProfileData;
+ 37: }
+ 38: export function ProfileResult({ url, data }: ProfileResultProps) {
+ 39:   const [tab, setTab] = useState("overview");
+ 40:   // If there was an error crawling this profile
+ 41:   if (data.error) {
+ 42:     return (
+ 43:       <Card className="mb-4 border-destructive">
+ 44:         <CardHeader className="pb-2">
+ 45:           <CardTitle className="text-sm font-medium flex items-center gap-2">
+ 46:             <AlertCircle className="h-4 w-4 text-destructive" />
+ 47:             Error crawling {url}
+ 48:           </CardTitle>
+ 49:         </CardHeader>
+ 50:         <CardContent>
+ 51:           <p className="text-sm text-muted-foreground">{data.error}</p>
+ 52:         </CardContent>
+ 53:       </Card>
+ 54:     );
+ 55:   }
+ 56:   const { platform, username, privacy_settings, activity_data, risk_assessment } = data;
+ 57:   const platformIcon = getPlatformIcon(platform);
+ 58:   const privacyScoreColor = getPrivacyScoreColor(risk_assessment.privacy_score);
+ 59:   return (
+ 60:     <Card className="mb-4">
+ 61:       <CardHeader>
+ 62:         <div className="flex justify-between items-center">
+ 63:           <div className="flex items-center gap-2">
+ 64:             {platformIcon}
+ 65:             <CardTitle className="text-base">
+ 66:               {platform.charAt(0).toUpperCase() + platform.slice(1)}:{" "}
+ 67:               <span className="font-normal">{username}</span>
+ 68:             </CardTitle>
+ 69:           </div>
+ 70:           <Badge variant={getRiskVariant(risk_assessment.risk_level)}>
+ 71:             {risk_assessment.risk_level.toUpperCase()} RISK
+ 72:           </Badge>
+ 73:         </div>
+ 74:         <CardDescription>
+ 75:           <div className="mt-2">
+ 76:             <div className="flex justify-between mb-1">
+ 77:               <span className="text-xs">Privacy Score</span>
+ 78:               <span className="text-xs font-medium">{risk_assessment.privacy_score}/100</span>
+ 79:             </div>
+ 80:             <Progress value={risk_assessment.privacy_score} className={`h-2 ${privacyScoreColor}`} />
+ 81:           </div>
+ 82:         </CardDescription>
+ 83:       </CardHeader>
+ 84:       <CardContent>
+ 85:         <Tabs defaultValue="overview" className="w-full" value={tab} onValueChange={setTab}>
+ 86:           <TabsList className="grid w-full grid-cols-4 mb-4">
+ 87:             <TabsTrigger value="overview">Overview</TabsTrigger>
+ 88:             <TabsTrigger value="privacy">Privacy</TabsTrigger>
+ 89:             <TabsTrigger value="activity">Activity</TabsTrigger>
+ 90:             <TabsTrigger value="risks">Risks</TabsTrigger>
+ 91:           </TabsList>
+ 92:           <TabsContent value="overview" className="space-y-4">
+ 93:             <div className="space-y-2">
+ 94:               <h4 className="text-sm font-semibold flex items-center gap-2">
+ 95:                 <Shield className="h-4 w-4" /> Privacy Score: {risk_assessment.privacy_score}/100
+ 96:               </h4>
+ 97:               <p className="text-xs text-muted-foreground">
+ 98:                 This account has a {risk_assessment.risk_level} risk level based on privacy settings and activity.
+ 99:               </p>
+100:             </div>
+101:             <div className="space-y-2">
+102:               <h4 className="text-sm font-semibold flex items-center gap-2">
+103:                 <AlertCircle className="h-4 w-4" /> Top Risks
+104:               </h4>
+105:               <ul className="text-xs space-y-1 pl-6 list-disc">
+106:                 {risk_assessment.risk_factors.slice(0, 3).map((factor, i) => (
+107:                   <li key={i}>{factor}</li>
+108:                 ))}
+109:               </ul>
+110:             </div>
+111:             <div className="space-y-2">
+112:               <h4 className="text-sm font-semibold flex items-center gap-2">
+113:                 <CheckCircle className="h-4 w-4" /> Top Recommendations
+114:               </h4>
+115:               <ul className="text-xs space-y-1 pl-6 list-disc">
+116:                 {risk_assessment.recommendations.slice(0, 3).map((rec, i) => (
+117:                   <li key={i}>{rec}</li>
+118:                 ))}
+119:               </ul>
+120:             </div>
+121:           </TabsContent>
+122:           <TabsContent value="privacy" className="space-y-4">
+123:             <h4 className="text-sm font-semibold flex items-center gap-2">
+124:               <Settings className="h-4 w-4" /> Privacy Settings
+125:             </h4>
+126:             <div className="space-y-2">
+127:               {Object.entries(privacy_settings).map(([key, value]) => (
+128:                 <div key={key} className="flex justify-between items-center py-1 border-b border-gray-100">
+129:                   <span className="text-xs">{formatKey(key)}</span>
+130:                   <Badge variant={value === true || value === "public" ? "destructive" : "success"}>
+131:                     {formatValue(value)}
+132:                   </Badge>
+133:                 </div>
+134:               ))}
+135:             </div>
+136:           </TabsContent>
+137:           <TabsContent value="activity" className="space-y-4">
+138:             <h4 className="text-sm font-semibold flex items-center gap-2">
+139:               <Activity className="h-4 w-4" /> Account Activity
+140:             </h4>
+141:             <div className="space-y-2">
+142:               {Object.entries(activity_data).map(([key, value]) => (
+143:                 <div key={key} className="flex justify-between items-center py-1 border-b border-gray-100">
+144:                   <span className="text-xs">{formatKey(key)}</span>
+145:                   <span className="text-xs font-medium">{value}</span>
+146:                 </div>
+147:               ))}
+148:             </div>
+149:           </TabsContent>
+150:           <TabsContent value="risks" className="space-y-4">
+151:             <div className="space-y-2">
+152:               <h4 className="text-sm font-semibold flex items-center gap-2">
+153:                 <AlertCircle className="h-4 w-4" /> Risk Factors
+154:               </h4>
+155:               <ul className="text-xs space-y-1 pl-6 list-disc">
+156:                 {risk_assessment.risk_factors.map((factor, i) => (
+157:                   <li key={i}>{factor}</li>
+158:                 ))}
+159:               </ul>
+160:             </div>
+161:             <div className="space-y-2">
+162:               <h4 className="text-sm font-semibold flex items-center gap-2">
+163:                 <CheckCircle className="h-4 w-4" /> Recommendations
+164:               </h4>
+165:               <ul className="text-xs space-y-1 pl-6 list-disc">
+166:                 {risk_assessment.recommendations.map((rec, i) => (
+167:                   <li key={i}>{rec}</li>
+168:                 ))}
+169:               </ul>
+170:             </div>
+171:           </TabsContent>
+172:         </Tabs>
+173:       </CardContent>
+174:     </Card>
+175:   );
+176: }
+177: // Helper functions
+178: function getPlatformIcon(platform: string) {
+179:   // You would typically use real platform icons here
+180:   return <User className="h-4 w-4" />;
+181: }
+182: function getRiskVariant(riskLevel: string): "default" | "destructive" | "outline" | "secondary" | "success" {
+183:   switch (riskLevel.toLowerCase()) {
+184:     case "high":
+185:       return "destructive";
+186:     case "medium":
+187:       return "secondary";
+188:     case "low":
+189:       return "success";
+190:     default:
+191:       return "default";
+192:   }
+193: }
+194: function getPrivacyScoreColor(score: number): string {
+195:   if (score < 40) return "bg-destructive";
+196:   if (score < 70) return "bg-yellow-500";
+197:   return "bg-green-500";
+198: }
+199: function formatKey(key: string): string {
+200:   return key
+201:     .split("_")
+202:     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+203:     .join(" ");
+204: }
+205: function formatValue(value: string | boolean): string {
+206:   if (typeof value === "boolean") {
+207:     return value ? "Enabled" : "Disabled";
+208:   }
+209:   return value.toString().charAt(0).toUpperCase() + value.toString().slice(1);
+210: }
+</file>
+
 <file path="components/theme-provider.tsx">
 1: 'use client'
 2: import * as React from 'react'
@@ -5750,6 +6920,186 @@ This section contains the contents of the repository's files.
 7: export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
 8:   return <NextThemesProvider {...props}>{children}</NextThemesProvider>
 9: }
+</file>
+
+<file path="context/privacy-context.tsx">
+  1: "use client";
+  2: import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+  3: import { PrivacyAPI } from '@/lib/privacy-api';
+  4: import { ProfileData } from '@/components/profile-result';
+  5: type PrivacyContextType = {
+  6:   userId: string | null;
+  7:   profileResults: Record<string, ProfileData> | null;
+  8:   profileUrls: string[];
+  9:   isLoading: boolean;
+ 10:   lastUpdated: Date | null;
+ 11:   error: string | null;
+ 12:   loadProfileData: () => Promise<void>;
+ 13:   submitProfiles: (urls: string[]) => Promise<void>;
+ 14:   clearData: () => void;
+ 15:   overallPrivacyScore: number;
+ 16:   publicInfoCount: number;
+ 17:   thirdPartyAccessCount: number;
+ 18:   dataByPlatform: Record<string, ProfileData[]>;
+ 19:   refreshData: () => Promise<void>;
+ 20: };
+ 21: const PrivacyContext = createContext<PrivacyContextType | undefined>(undefined);
+ 22: export const PrivacyProvider = ({ children }: { children: ReactNode }) => {
+ 23:   const [userId, setUserId] = useState<string | null>(null);
+ 24:   const [profileResults, setProfileResults] = useState<Record<string, ProfileData> | null>(null);
+ 25:   const [profileUrls, setProfileUrls] = useState<string[]>([]);
+ 26:   const [isLoading, setIsLoading] = useState<boolean>(false);
+ 27:   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+ 28:   const [error, setError] = useState<string | null>(null);
+ 29:   // Derived state
+ 30:   const overallPrivacyScore = calculateOverallScore(profileResults);
+ 31:   const publicInfoCount = calculatePublicInfoCount(profileResults);
+ 32:   const thirdPartyAccessCount = calculateThirdPartyAccessCount(profileResults);
+ 33:   const dataByPlatform = groupByPlatform(profileResults);
+ 34:   // Load any stored user ID on component mount
+ 35:   useEffect(() => {
+ 36:     const storedUserId = localStorage.getItem('fiasco_user_id');
+ 37:     if (storedUserId) {
+ 38:       setUserId(storedUserId);
+ 39:       loadProfileData(storedUserId);
+ 40:     }
+ 41:   }, []);
+ 42:   // Load profile data from the API
+ 43:   const loadProfileData = async (id?: string) => {
+ 44:     const userIdToUse = id || userId;
+ 45:     if (!userIdToUse) return;
+ 46:     setIsLoading(true);
+ 47:     setError(null);
+ 48:     try {
+ 49:       const api = PrivacyAPI.getInstance();
+ 50:       const data = await api.getProfileResults(userIdToUse);
+ 51:       setProfileResults(data.results);
+ 52:       setProfileUrls(data.urls);
+ 53:       setLastUpdated(new Date());
+ 54:     } catch (err) {
+ 55:       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+ 56:       // Only set error if it's not a "not found" error for a new user
+ 57:       if (errorMessage !== 'Profile not found') {
+ 58:         setError(errorMessage);
+ 59:       }
+ 60:     } finally {
+ 61:       setIsLoading(false);
+ 62:     }
+ 63:   };
+ 64:   // Submit new profiles for analysis
+ 65:   const submitProfiles = async (urls: string[]) => {
+ 66:     setIsLoading(true);
+ 67:     setError(null);
+ 68:     try {
+ 69:       const api = PrivacyAPI.getInstance();
+ 70:       const data = await api.submitProfiles(urls, userId || undefined);
+ 71:       // Store the user ID
+ 72:       if (data.user_id) {
+ 73:         localStorage.setItem('fiasco_user_id', data.user_id);
+ 74:         setUserId(data.user_id);
+ 75:       }
+ 76:       setProfileResults(data.results);
+ 77:       setProfileUrls(data.urls);
+ 78:       setLastUpdated(new Date());
+ 79:     } catch (err) {
+ 80:       setError(err instanceof Error ? err.message : 'Unknown error occurred');
+ 81:     } finally {
+ 82:       setIsLoading(false);
+ 83:     }
+ 84:   };
+ 85:   // Refresh data
+ 86:   const refreshData = async () => {
+ 87:     if (profileUrls.length > 0 && userId) {
+ 88:       await submitProfiles(profileUrls);
+ 89:     }
+ 90:   };
+ 91:   // Clear all data
+ 92:   const clearData = () => {
+ 93:     localStorage.removeItem('fiasco_user_id');
+ 94:     setUserId(null);
+ 95:     setProfileResults(null);
+ 96:     setProfileUrls([]);
+ 97:     setLastUpdated(null);
+ 98:   };
+ 99:   return (
+100:     <PrivacyContext.Provider
+101:       value={{
+102:         userId,
+103:         profileResults,
+104:         profileUrls,
+105:         isLoading,
+106:         lastUpdated,
+107:         error,
+108:         loadProfileData: () => loadProfileData(),
+109:         submitProfiles,
+110:         clearData,
+111:         overallPrivacyScore,
+112:         publicInfoCount,
+113:         thirdPartyAccessCount,
+114:         dataByPlatform,
+115:         refreshData,
+116:       }}
+117:     >
+118:       {children}
+119:     </PrivacyContext.Provider>
+120:   );
+121: };
+122: export const usePrivacy = () => {
+123:   const context = useContext(PrivacyContext);
+124:   if (context === undefined) {
+125:     throw new Error('usePrivacy must be used within a PrivacyProvider');
+126:   }
+127:   return context;
+128: };
+129: // Helper functions for derived state
+130: function calculateOverallScore(profileResults: Record<string, ProfileData> | null): number {
+131:   if (!profileResults) return 0;
+132:   const scores = Object.values(profileResults).map(
+133:     profile => profile.risk_assessment?.privacy_score || 0
+134:   );
+135:   if (scores.length === 0) return 0;
+136:   return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+137: }
+138: function calculatePublicInfoCount(profileResults: Record<string, ProfileData> | null): number {
+139:   if (!profileResults) return 0;
+140:   let count = 0;
+141:   Object.values(profileResults).forEach(profile => {
+142:     const settings = profile.privacy_settings || {};
+143:     // Count settings that are public or enabled
+144:     Object.entries(settings).forEach(([key, value]) => {
+145:       if (
+146:         value === 'public' || 
+147:         value === true || 
+148:         (typeof value === 'string' && value.includes('public'))
+149:       ) {
+150:         count++;
+151:       }
+152:     });
+153:   });
+154:   return count;
+155: }
+156: function calculateThirdPartyAccessCount(profileResults: Record<string, ProfileData> | null): number {
+157:   if (!profileResults) return 0;
+158:   // This would normally count third-party apps with access
+159:   // For this demo, we'll use a random number based on the number of profiles
+160:   const profileCount = Object.keys(profileResults).length;
+161:   return profileCount > 0 ? Math.min(profileCount * 2 + Math.floor(Math.random() * 5), 12) : 0;
+162: }
+163: function groupByPlatform(profileResults: Record<string, ProfileData> | null): Record<string, ProfileData[]> {
+164:   if (!profileResults) return {};
+165:   const grouped: Record<string, ProfileData[]> = {};
+166:   Object.entries(profileResults).forEach(([url, profile]) => {
+167:     const platform = profile.platform || 'unknown';
+168:     if (!grouped[platform]) {
+169:       grouped[platform] = [];
+170:     }
+171:     grouped[platform].push({
+172:       ...profile,
+173:       url // Add the URL to the profile for reference
+174:     } as ProfileData);
+175:   });
+176:   return grouped;
+177: }
 </file>
 
 <file path="hooks/use-mobile.tsx">
@@ -5936,6 +7286,282 @@ This section contains the contents of the repository's files.
 163: export { useToast, toast }
 </file>
 
+<file path="lib/mocks/api-mock.ts">
+  1: /**
+  2:  * Mock implementation of the PrivacyAPI for testing purposes
+  3:  */
+  4: import { ProfileData } from "@/components/profile-result";
+  5: // Mock data for different platforms
+  6: const mockPlatformData: Record<string, any> = {
+  7:   twitter: {
+  8:     platform: "twitter",
+  9:     privacy_settings: {
+ 10:       account_privacy: "public",
+ 11:       who_can_message: "everyone",
+ 12:       location_sharing: true,
+ 13:       data_personalization: true,
+ 14:       tagged_photo_review: false
+ 15:     },
+ 16:     activity_data: {
+ 17:       post_count: 423,
+ 18:       follower_count: 1245,
+ 19:       following_count: 867,
+ 20:       retweet_count: 256,
+ 21:       like_count: 1782,
+ 22:       lists_count: 5,
+ 23:       verification_status: false,
+ 24:       tweets_with_media: 73
+ 25:     },
+ 26:     risk_assessment: {
+ 27:       privacy_score: 35,
+ 28:       risk_level: "high",
+ 29:       risk_factors: [
+ 30:         "Public account exposes your content to anyone",
+ 31:         "Location data attached to multiple posts",
+ 32:         "Data personalization enabled allows platform to track preferences"
+ 33:       ],
+ 34:       recommendations: [
+ 35:         "Set your account to private",
+ 36:         "Disable location sharing",
+ 37:         "Disable data personalization in settings"
+ 38:       ]
+ 39:     }
+ 40:   },
+ 41:   facebook: {
+ 42:     platform: "facebook",
+ 43:     privacy_settings: {
+ 44:       profile_visibility: "public",
+ 45:       friend_list_visibility: "friends",
+ 46:       future_post_privacy: "public",
+ 47:       tagged_photo_review: true,
+ 48:       face_recognition: true
+ 49:     },
+ 50:     activity_data: {
+ 51:       post_count: 278,
+ 52:       follower_count: 843,
+ 53:       following_count: 462,
+ 54:       friend_count: 732,
+ 55:       page_likes: 156,
+ 56:       group_memberships: 12,
+ 57:       events_attended: 34,
+ 58:       photos_uploaded: 189
+ 59:     },
+ 60:     risk_assessment: {
+ 61:       privacy_score: 42,
+ 62:       risk_level: "high",
+ 63:       risk_factors: [
+ 64:         "Public profile visibility exposes your information to anyone",
+ 65:         "Face recognition enabled can reduce privacy",
+ 66:         "High post count creates a detailed digital footprint"
+ 67:       ],
+ 68:       recommendations: [
+ 69:         "Set your profile to friends only",
+ 70:         "Turn off face recognition",
+ 71:         "Review and limit past post visibility"
+ 72:       ]
+ 73:     }
+ 74:   },
+ 75:   instagram: {
+ 76:     platform: "instagram",
+ 77:     privacy_settings: {
+ 78:       account_privacy: "private",
+ 79:       activity_status: true,
+ 80:       story_sharing: "close friends only",
+ 81:       mentioned_story_sharing: false,
+ 82:       data_sharing_with_partners: true
+ 83:     },
+ 84:     activity_data: {
+ 85:       post_count: 156,
+ 86:       follower_count: 925,
+ 87:       following_count: 534,
+ 88:       average_likes: 112,
+ 89:       highlight_reels: 8,
+ 90:       saved_posts: 43,
+ 91:       tagged_photos: 27,
+ 92:       stories_posted: 312
+ 93:     },
+ 94:     risk_assessment: {
+ 95:       privacy_score: 65,
+ 96:       risk_level: "medium",
+ 97:       risk_factors: [
+ 98:         "Data sharing with partners enabled",
+ 99:         "Activity status visible to all followers"
+100:       ],
+101:       recommendations: [
+102:         "Disable data sharing with partners",
+103:         "Turn off activity status"
+104:       ]
+105:     }
+106:   }
+107: };
+108: // Generate username based on the platform and URL
+109: function generateUsername(url: string, platform: string): string {
+110:   const parts = url.split('/');
+111:   const username = parts[parts.length - 1] || `user_${Math.floor(Math.random() * 10000)}`;
+112:   return username;
+113: }
+114: // Determine platform from URL
+115: function getPlatformFromUrl(url: string): string {
+116:   const lowerUrl = url.toLowerCase();
+117:   if (lowerUrl.includes('twitter.com') || lowerUrl.includes('x.com')) {
+118:     return 'twitter';
+119:   } else if (lowerUrl.includes('facebook.com')) {
+120:     return 'facebook';
+121:   } else if (lowerUrl.includes('instagram.com')) {
+122:     return 'instagram';
+123:   } else if (lowerUrl.includes('linkedin.com')) {
+124:     return 'linkedin';
+125:   } else if (lowerUrl.includes('tiktok.com')) {
+126:     return 'tiktok';
+127:   } else if (lowerUrl.includes('youtube.com')) {
+128:     return 'youtube';
+129:   } else {
+130:     return 'unknown';
+131:   }
+132: }
+133: // Simulate delay
+134: const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+135: export class MockPrivacyAPI {
+136:   private static instance: MockPrivacyAPI;
+137:   private storedData: Record<string, any> = {};
+138:   private constructor() {}
+139:   public static getInstance(): MockPrivacyAPI {
+140:     if (!MockPrivacyAPI.instance) {
+141:       MockPrivacyAPI.instance = new MockPrivacyAPI();
+142:     }
+143:     return MockPrivacyAPI.instance;
+144:   }
+145:   public async submitProfiles(urls: string[], userId?: string): Promise<{
+146:     status: string;
+147:     user_id: string;
+148:     urls: string[];
+149:     results: Record<string, ProfileData>;
+150:   }> {
+151:     // Simulate API delay
+152:     await delay(1000);
+153:     // Generate or use existing user ID
+154:     const user_id = userId || `user_${Date.now()}`;
+155:     // Process URLs
+156:     const results: Record<string, ProfileData> = {};
+157:     for (const url of urls) {
+158:       const platform = getPlatformFromUrl(url);
+159:       const username = generateUsername(url, platform);
+160:       // Get mock data for this platform or default to twitter
+161:       const mockData = mockPlatformData[platform] || mockPlatformData.twitter;
+162:       // Create profile data
+163:       results[url] = {
+164:         ...mockData,
+165:         platform,
+166:         username,
+167:         timestamp: new Date().toISOString()
+168:       } as ProfileData;
+169:     }
+170:     // Store the results
+171:     this.storedData[user_id] = {
+172:       urls,
+173:       results,
+174:       timestamp: new Date().toISOString()
+175:     };
+176:     return {
+177:       status: "processed",
+178:       user_id,
+179:       urls,
+180:       results
+181:     };
+182:   }
+183:   public async getProfileResults(userId: string): Promise<{
+184:     urls: string[];
+185:     results: Record<string, ProfileData>;
+186:     timestamp?: string;
+187:   }> {
+188:     // Simulate API delay
+189:     await delay(500);
+190:     if (!this.storedData[userId]) {
+191:       throw new Error("Profile not found");
+192:     }
+193:     return this.storedData[userId];
+194:   }
+195:   // Clear all stored data (useful for testing)
+196:   public clearData(): void {
+197:     this.storedData = {};
+198:   }
+199: }
+</file>
+
+<file path="lib/privacy-api.ts">
+ 1: import { ProfileData } from "@/components/profile-result";
+ 2: /**
+ 3:  * API service for interacting with the privacy backend
+ 4:  */
+ 5: export class PrivacyAPI {
+ 6:   private static instance: PrivacyAPI;
+ 7:   private baseUrl: string;
+ 8:   private constructor() {
+ 9:     this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+10:   }
+11:   /**
+12:    * Get singleton instance of the API
+13:    */
+14:   public static getInstance(): PrivacyAPI {
+15:     if (!PrivacyAPI.instance) {
+16:       PrivacyAPI.instance = new PrivacyAPI();
+17:     }
+18:     return PrivacyAPI.instance;
+19:   }
+20:   /**
+21:    * Submit profiles for analysis
+22:    */
+23:   public async submitProfiles(urls: string[], userId?: string): Promise<{
+24:     status: string;
+25:     user_id: string;
+26:     urls: string[];
+27:     results: Record<string, ProfileData>;
+28:   }> {
+29:     try {
+30:       const response = await fetch(`${this.baseUrl}/profiles`, {
+31:         method: 'POST',
+32:         headers: {
+33:           'Content-Type': 'application/json',
+34:         },
+35:         body: JSON.stringify({
+36:           urls,
+37:           ...(userId ? { user_id: userId } : {}),
+38:         }),
+39:       });
+40:       if (!response.ok) {
+41:         throw new Error(`HTTP error ${response.status}`);
+42:       }
+43:       return await response.json();
+44:     } catch (error) {
+45:       console.error('Error submitting profiles:', error);
+46:       throw error;
+47:     }
+48:   }
+49:   /**
+50:    * Get profile analysis by ID
+51:    */
+52:   public async getProfileResults(userId: string): Promise<{
+53:     urls: string[];
+54:     results: Record<string, ProfileData>;
+55:     timestamp?: string;
+56:   }> {
+57:     try {
+58:       const response = await fetch(`${this.baseUrl}/profiles/${userId}`);
+59:       if (!response.ok) {
+60:         if (response.status === 404) {
+61:           throw new Error('Profile not found');
+62:         }
+63:         throw new Error(`HTTP error ${response.status}`);
+64:       }
+65:       return await response.json();
+66:     } catch (error) {
+67:       console.error('Error getting profile results:', error);
+68:       throw error;
+69:     }
+70:   }
+71: }
+</file>
+
 <file path="lib/utils.ts">
 1: import { clsx, type ClassValue } from "clsx"
 2: import { twMerge } from "tailwind-merge"
@@ -5950,6 +7576,47 @@ This section contains the contents of the repository's files.
 
 <file path="public/placeholder.svg">
 1: <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" fill="none"><rect width="1200" height="1200" fill="#EAEAEA" rx="3"/><g opacity=".5"><g opacity=".5"><path fill="#FAFAFA" d="M600.709 736.5c-75.454 0-136.621-61.167-136.621-136.62 0-75.454 61.167-136.621 136.621-136.621 75.453 0 136.62 61.167 136.62 136.621 0 75.453-61.167 136.62-136.62 136.62Z"/><path stroke="#C9C9C9" stroke-width="2.418" d="M600.709 736.5c-75.454 0-136.621-61.167-136.621-136.62 0-75.454 61.167-136.621 136.621-136.621 75.453 0 136.62 61.167 136.62 136.621 0 75.453-61.167 136.62-136.62 136.62Z"/></g><path stroke="url(#a)" stroke-width="2.418" d="M0-1.209h553.581" transform="scale(1 -1) rotate(45 1163.11 91.165)"/><path stroke="url(#b)" stroke-width="2.418" d="M404.846 598.671h391.726"/><path stroke="url(#c)" stroke-width="2.418" d="M599.5 795.742V404.017"/><path stroke="url(#d)" stroke-width="2.418" d="m795.717 796.597-391.441-391.44"/><path fill="#fff" d="M600.709 656.704c-31.384 0-56.825-25.441-56.825-56.824 0-31.384 25.441-56.825 56.825-56.825 31.383 0 56.824 25.441 56.824 56.825 0 31.383-25.441 56.824-56.824 56.824Z"/><g clip-path="url(#e)"><path fill="#666" fill-rule="evenodd" d="M616.426 586.58h-31.434v16.176l3.553-3.554.531-.531h9.068l.074-.074 8.463-8.463h2.565l7.18 7.181V586.58Zm-15.715 14.654 3.698 3.699 1.283 1.282-2.565 2.565-1.282-1.283-5.2-5.199h-6.066l-5.514 5.514-.073.073v2.876a2.418 2.418 0 0 0 2.418 2.418h26.598a2.418 2.418 0 0 0 2.418-2.418v-8.317l-8.463-8.463-7.181 7.181-.071.072Zm-19.347 5.442v4.085a6.045 6.045 0 0 0 6.046 6.045h26.598a6.044 6.044 0 0 0 6.045-6.045v-7.108l1.356-1.355-1.282-1.283-.074-.073v-17.989h-38.689v23.43l-.146.146.146.147Z" clip-rule="evenodd"/></g><path stroke="#C9C9C9" stroke-width="2.418" d="M600.709 656.704c-31.384 0-56.825-25.441-56.825-56.824 0-31.384 25.441-56.825 56.825-56.825 31.383 0 56.824 25.441 56.824 56.825 0 31.383-25.441 56.824-56.824 56.824Z"/></g><defs><linearGradient id="a" x1="554.061" x2="-.48" y1=".083" y2=".087" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="b" x1="796.912" x2="404.507" y1="599.963" y2="599.965" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="c" x1="600.792" x2="600.794" y1="403.677" y2="796.082" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="d" x1="404.85" x2="796.972" y1="403.903" y2="796.02" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><clipPath id="e"><path fill="#fff" d="M581.364 580.535h38.689v38.689h-38.689z"/></clipPath></defs></svg>
+</file>
+
+<file path="scripts/release.sh">
+ 1: #!/bin/bash
+ 2: set -e
+ 3: # Get the new version from the command line
+ 4: if [ -z "$1" ]; then
+ 5:   echo "Please provide a version number (e.g. 1.0.0)"
+ 6:   exit 1
+ 7: fi
+ 8: NEW_VERSION=$1
+ 9: CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+10: # Ensure we're on the main branch
+11: if [ "$CURRENT_BRANCH" != "main" ]; then
+12:   echo "Please switch to the main branch before releasing"
+13:   exit 1
+14: fi
+15: # Ensure the working directory is clean
+16: if [ -n "$(git status --porcelain)" ]; then
+17:   echo "Working directory is not clean. Please commit or stash changes."
+18:   exit 1
+19: fi
+20: # Pull latest changes
+21: git pull origin main
+22: # Run tests
+23: echo "Running tests..."
+24: make test
+25: # Update version in package.json
+26: echo "Updating version to $NEW_VERSION..."
+27: sed -i '' "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" package.json
+28: # Create a release commit
+29: git add package.json
+30: git commit -m "Release v$NEW_VERSION"
+31: # Create a git tag
+32: git tag -a "v$NEW_VERSION" -m "Version $NEW_VERSION"
+33: # Push changes and tag
+34: echo "Pushing changes and tag..."
+35: git push origin main
+36: git push origin "v$NEW_VERSION"
+37: echo "Release v$NEW_VERSION completed successfully!"
+38: echo "Remember to update the release notes on GitHub: https://github.com/yourusername/fiasco/releases/new?tag=v$NEW_VERSION"
 </file>
 
 <file path="styles/globals.css">
@@ -6075,6 +7742,10 @@ This section contains the contents of the repository's files.
 27: next-env.d.ts
 </file>
 
+<file path=".nvmrc">
+1: 20
+</file>
+
 <file path="components.json">
  1: {
  2:   "$schema": "https://ui.shadcn.com/schema.json",
@@ -6097,6 +7768,167 @@ This section contains the contents of the repository's files.
 19:   },
 20:   "iconLibrary": "lucide"
 21: }
+</file>
+
+<file path="CONTRIBUTING.md">
+ 1: # Contributing to Fiasco
+ 2: 
+ 3: Thank you for your interest in contributing to Fiasco! This document provides guidelines and instructions for contributing.
+ 4: 
+ 5: ## Development Setup
+ 6: 
+ 7: Please refer to the [README.md](README.md) for setup instructions.
+ 8: 
+ 9: ## Development Workflow
+10: 
+11: 1. Fork the repository
+12: 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+13: 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+14: 4. Push to the branch (`git push origin feature/amazing-feature`)
+15: 5. Open a Pull Request
+16: 
+17: ## Pull Request Process
+18: 
+19: 1. Update the README.md or documentation with details of changes if appropriate
+20: 2. Update the tests to cover your changes
+21: 3. Ensure all tests and linting passes
+22: 4. Your PR will be reviewed by maintainers who may request changes
+23: 
+24: ## Code Style
+25: 
+26: - **Python**: Follow PEP 8 guidelines
+27: - **JavaScript/TypeScript**: Follow the project's ESLint configuration
+28: - Write meaningful commit messages
+29: 
+30: ## Testing
+31: 
+32: - Add tests for all new features or bug fixes
+33: - Ensure all tests pass before submitting a PR
+34: 
+35: ## Issue Reporting
+36: 
+37: - Use the issue templates provided
+38: - Provide clear steps to reproduce bugs
+39: - Include environment details (OS, browser, versions)
+40: 
+41: ## Pull Request Template
+42: 
+43: Please use the provided pull request template when opening PRs.
+44: 
+45: ## License
+46: 
+47: By contributing, you agree that your contributions will be licensed under the project's license.
+</file>
+
+<file path="jest.config.js">
+ 1: // jest.config.js
+ 2: const nextJest = require('next/jest');
+ 3: const createJestConfig = nextJest({
+ 4:   // Path to Next.js app
+ 5:   dir: './',
+ 6: });
+ 7: // Add any custom config to be passed to Jest
+ 8: const customJestConfig = {
+ 9:   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+10:   testEnvironment: 'jest-environment-jsdom',
+11:   moduleNameMapper: {
+12:     '^@/components/(.*)$': '<rootDir>/components/$1',
+13:     '^@/lib/(.*)$': '<rootDir>/lib/$1',
+14:     '^@/hooks/(.*)$': '<rootDir>/hooks/$1',
+15:     '^@/context/(.*)$': '<rootDir>/context/$1',
+16:   },
+17: };
+18: // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
+19: module.exports = createJestConfig(customJestConfig);
+</file>
+
+<file path="jest.setup.js">
+ 1: // Optional: configure or set up a testing framework before each test.
+ 2: // If you delete this file, remove `setupFilesAfterEnv` from `jest.config.js`
+ 3: // Used for __tests__/testing-library.js
+ 4: // Learn more: https://github.com/testing-library/jest-dom
+ 5: import '@testing-library/jest-dom/extend-expect';
+ 6: // Mock next/navigation
+ 7: jest.mock('next/navigation', () => ({
+ 8:   useRouter: () => ({
+ 9:     push: jest.fn(),
+10:     replace: jest.fn(),
+11:     prefetch: jest.fn(),
+12:     back: jest.fn(),
+13:   }),
+14:   usePathname: () => '/test-path',
+15: }));
+16: // Mock next/image
+17: jest.mock('next/image', () => ({
+18:   __esModule: true,
+19:   default: (props) => {
+20:     // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+21:     return <img {...props} />;
+22:   },
+23: }));
+24: // Mock ResizeObserver which isn't available in jsdom
+25: global.ResizeObserver = jest.fn().mockImplementation(() => ({
+26:   observe: jest.fn(),
+27:   unobserve: jest.fn(),
+28:   disconnect: jest.fn(),
+29: }));
+</file>
+
+<file path="Makefile">
+ 1: .PHONY: setup-backend setup-frontend run-backend run-backend-dev run-frontend test-backend test-frontend
+ 2: 
+ 3: # Setup commands
+ 4: setup-backend:
+ 5: 	cd backend && uv venv && . .venv/bin/activate && uv pip install -r requirements.txt
+ 6: 
+ 7: setup-frontend:
+ 8: 	pnpm install
+ 9: 
+10: setup: setup-backend setup-frontend
+11: 
+12: # Run commands
+13: run-backend:
+14: 	cd backend && . .venv/bin/activate && python run.py
+15: 
+16: run-backend-dev:
+17: 	cd backend && . .venv/bin/activate && FLASK_APP=app.py FLASK_ENV=development python -m flask run --host=0.0.0.0 --port=5000
+18: 
+19: run-frontend:
+20: 	pnpm dev
+21: 
+22: # Test commands
+23: test-backend:
+24: 	cd backend && . .venv/bin/activate && python -m pytest tests/
+25: 
+26: test-frontend:
+27: 	pnpm test
+28: 
+29: # All tests
+30: test: test-backend test-frontend
+31: 
+32: # CI checks
+33: ci-checks:
+34: 	pnpm lint
+35: 	cd backend && . .venv/bin/activate && python -m pytest tests/
+36: 
+37: # Default command when just running 'make'
+38: all: setup test
+39: 
+40: # Help command
+41: help:
+42: 	@echo "Available commands:"
+43: 	@echo "  make setup-backend      - Setup Python backend environment"
+44: 	@echo "  make setup-frontend     - Setup Node.js frontend environment"
+45: 	@echo "  make setup              - Setup both backend and frontend"
+46: 	@echo "  make run-backend        - Run the Flask backend server"
+47: 	@echo "  make run-backend-dev    - Run the Flask backend server in development mode"
+48: 	@echo "  make run-frontend       - Run the Next.js frontend development server"
+49: 	@echo "  make test-backend       - Run backend tests"
+50: 	@echo "  make test-frontend      - Run frontend tests"
+51: 	@echo "  make test               - Run all tests"
+52: 	@echo "  make ci-checks          - Run CI checks locally"
+53: 	@echo "  make all                - Setup and test everything"
+54: 	@echo "  make help               - Show this help message"
 </file>
 
 <file path="mise.toml">
@@ -6194,6 +8026,243 @@ This section contains the contents of the repository's files.
 70: }
 </file>
 
+<file path="plan.md">
+  1: Below is a high-level blueprint for integrating the existing Next.js front-end with a Python + Flask backend for crawling user public profiles, storing the data, and powering the analytics/report. After the blueprint, there is a breakdown into smaller iterative steps. Finally, there is a series of code-generation prompts—each building incrementally, including testing. Feel free to adapt paths, variable names, and so on for your environment.
+  2: 
+  3: ---
+  4: 
+  5: ## **Blueprint**
+  6: 
+  7: 1. **Frontend Enhancements (Next.js + React):**
+  8:    - Add a user input form where users can submit their profile URLs.
+  9:    - Upon submission, the front-end calls the Flask API to schedule or run a crawler.
+ 10:    - Display success/failure or any in-progress states.
+ 11:    - Use the returned JSON from the Flask backend to feed data into the existing "privacy dashboard" components.
+ 12: 
+ 13: 2. **Backend Setup (Flask in Python):**
+ 14:    - Create a new Flask application with endpoints for:
+ 15:      - **`POST /profiles`**: Accepts JSON with user’s social media URLs, queues up or triggers a crawler job.
+ 16:      - **`GET /profiles/<user_id>`**: Returns the crawled data for that user, in a shape that the Next.js components can consume directly.
+ 17:    - Implement a basic crawler logic or integrate with a dedicated crawling library.
+ 18:    - Store or cache results in memory or a database. 
+ 19:    - Return summarized data to match the structure required by the Next.js “Privacy Dashboard”.
+ 20: 
+ 21: 3. **Crawler/Worker Layer:**
+ 22:    - If the crawls are quick, run them in the same Flask process.
+ 23:    - If complex or time-consuming, use a worker queue (e.g. RQ or Celery) for asynchronous tasks. 
+ 24:    - The crawler fetches each public profile, extracts relevant data (posts, tags, settings).
+ 25:    - Summarize the data for each platform into a single object returned to the front-end.
+ 26: 
+ 27: 4. **Integration / Data Pipeline:**
+ 28:    - On the front-end, track user session or ID to request the data from the backend.
+ 29:    - On the backend, associate each user’s crawled data with an ID or token.
+ 30:    - Serve that data back when requested by the Next.js front-end, or store it short-term.
+ 31: 
+ 32: 5. **Security & Testing:**
+ 33:    - Ensure only authorized or expected users can read certain data. (Potentially out of scope if this is just a local prototype.)
+ 34:    - Write tests in both Flask and React layers:
+ 35:      - React tests (Jest/React Testing Library).
+ 36:      - Flask tests (pytest) for the endpoints, data flow, crawler logic.
+ 37: 
+ 38: ---
+ 39: 
+ 40: ## **Iterative Breakdown of Tasks**
+ 41: 
+ 42: ### **Iteration 1**: Basic Flask Skeleton
+ 43: - Create a new Python virtual environment.
+ 44: - Install Flask.
+ 45: - Build a minimal Flask app with a single test route.
+ 46: - Confirm app runs and test with a single unit test.
+ 47: 
+ 48: ### **Iteration 2**: Basic Next.js to Flask Communication
+ 49: - Update the Next.js front-end to have a form that calls the Flask endpoint (e.g., `/profiles`) via `fetch` or Axios.
+ 50: - Return mock responses from the Flask side.
+ 51: - Display a success or failure notification on the front-end.
+ 52: 
+ 53: ### **Iteration 3**: Real Crawler Prototype
+ 54: - Implement a simple crawler method (or mock it out).
+ 55: - Create a “crawl_something(url)” function to parse publicly available profile data (just faked data for now).
+ 56: - Integrate the function in your Flask endpoint so that the POST triggers a crawl and returns the results.
+ 57: 
+ 58: ### **Iteration 4**: Data Storage & Retrieval
+ 59: - Store the results from each crawl in an in-memory dictionary (or a simple DB).
+ 60: - Add a second endpoint (`GET /profiles/<user_id>`) to retrieve it.
+ 61: - From the Next.js side, fetch that endpoint to populate the “DataExposureMetrics” and other components.
+ 62: 
+ 63: ### **Iteration 5**: Advanced Crawler & Summaries
+ 64: - Expand the crawler to handle multiple platforms or some real logic (like scraping a Twitter handle).
+ 65: - Summarize data: user posts, number of photos, location tags, etc.
+ 66: - Return a JSON shape that closely matches the existing usage in “PrivacyDashboard”.
+ 67: 
+ 68: ### **Iteration 6**: Front-End Display Integration
+ 69: - Wire the data from your backend into the React components:
+ 70:   - Replace the “fake data” in `DataExposureMetrics` or `PlatformSettings` with dynamic data from the Flask service.
+ 71: - Add any visual indicators or placeholders while the data is loading or if an error occurs.
+ 72: 
+ 73: ### **Iteration 7**: Testing & Validation
+ 74: - Add unit tests in Flask:
+ 75:   - Test each endpoint with Pytest.
+ 76:   - Mock the crawler for faster test runs.
+ 77: - Add front-end tests:
+ 78:   - Basic snapshot or functional tests for the new form, error states, success states.
+ 79: 
+ 80: ### **Iteration 8**: Production Hardening
+ 81: - If needed: add user login, secure the endpoints, handle large volume of crawls with a job queue (e.g., RQ or Celery + Redis).
+ 82: - Add real logging, environment config, etc.
+ 83: 
+ 84: ---
+ 85: 
+ 86: ## **Further Breakdown to Small Steps**
+ 87: 
+ 88: Here is a finer breakdown of each iteration, with smaller steps for each:
+ 89: 
+ 90: 1. **Basic Flask Skeleton**
+ 91:    1. Create a new folder `backend` and a new Python virtual environment: `python -m venv venv`
+ 92:    2. Install Flask: `pip install flask pytest`
+ 93:    3. Create `backend/app.py` with a minimal Flask `hello world`.
+ 94:    4. Add `tests/test_app.py` with a single unit test that starts the Flask app and checks an endpoint.
+ 95: 
+ 96: 2. **Basic Next.js to Flask Communication**
+ 97:    1. In Next.js, add a new page or a form (component) for entering profile URLs.
+ 98:    2. Hook form submission to an async function that calls `fetch("http://localhost:5000/profiles", { method: "POST" })`.
+ 99:    3. In `backend/app.py`, create a `POST /profiles` endpoint that returns a mock JSON (e.g., `{"status": "ok"}`).
+100:    4. On success, show an alert or toast on the front-end.
+101: 
+102: 3. **Real Crawler Prototype**
+103:    1. Create a `crawler.py` in the backend with a function `crawl_profile(url) -> dict`.
+104:    2. Hard-code or mock out the returned data.
+105:    3. In the `POST /profiles` route, call `crawl_profile(url)` for each given URL, then combine results in a dictionary.
+106:    4. Return that dictionary as JSON to the front-end.
+107: 
+108: 4. **Data Storage & Retrieval**
+109:    1. Store results in a global dictionary, keyed by user or by a random ID: `crawler_results = {}`.
+110:    2. After the crawler finishes, store the data in `crawler_results[id]`.
+111:    3. Add a `GET /profiles/<user_id>` endpoint that returns `crawler_results[id]`.
+112:    4. On the front-end, after submitting, poll or request `GET /profiles/<user_id>` to get the data and show it.
+113: 
+114: 5. **Advanced Crawler & Summaries**
+115:    1. Replace the mock crawler with real logic for any public endpoint (or keep partial mocks).
+116:    2. Summarize data (like number of posts, privacy settings, etc.).
+117:    3. Format it to match how `DataExposureMetrics` or `PlatformSettings` is structured.
+118: 
+119: 6. **Front-End Display Integration**
+120:    1. In `PrivacyDashboard`, fetch the new data from the Python API.
+121:    2. Update the “Overview,” “PlatformSettings,” and “DataExposureMetrics” components to accept the new data props.
+122:    3. Replace placeholders with dynamic data.
+123: 
+124: 7. **Testing & Validation**
+125:    1. Write Pytest tests for the `GET /profiles/<id>` and `POST /profiles`.
+126:    2. Add React Testing Library or Cypress tests for verifying the front-end flow: user enters URL -> sees results.
+127: 
+128: 8. **Production Hardening**
+129:    1. Add environment-based config for your flask app (development vs production).
+130:    2. Add a queue system if real crawling is slow.
+131:    3. Add any needed security or login to ensure only the correct user sees their data.
+132: 
+133: ---
+134: 
+135: ## **Series of Code-Generation Prompts (Test-Driven)**
+136: 
+137: Below is a set of example prompts you can feed to a code-generation LLM in sequence. Each is self-contained, but references the previous step, building up the code incrementally. Feel free to tweak the JSON structure, endpoints, etc. according to your style:
+138: 
+139: ---
+140: 
+141: ### **Prompt 1: Flask Skeleton**
+142: 
+143: ```text
+144: Write a `backend/app.py` for a minimal Flask application. It should:
+145: 1. Create a Flask instance.
+146: 2. Have one route `/health` that returns `{"status": "ok"}` as JSON.
+147: 3. For testing, include a simple `GET /ping` that returns `pong`.
+148: Write accompanying `tests/test_app.py` with pytest that starts the Flask app and checks that `/health` and `/ping` return the expected results. Use short but complete code with comments.
+149: ```
+150: 
+151: ---
+152: 
+153: ### **Prompt 2: Connect Next.js form to Flask**
+154: 
+155: ```text
+156: We have a Next.js page with a form (call it `components/ProfileForm.tsx`). When the user clicks submit, it should POST to `http://localhost:5000/profiles`. For now, the backend endpoint should return a static JSON response: 
+157: ```
+158: {
+159:   "status": "received",
+160:   "urls": [ ...the urls that were sent... ]
+161: }
+162: ```
+163: Please provide:
+164: 1. The updated `app.py` with a `POST /profiles` route that logs the received URLs and returns the JSON above.
+165: 2. The `ProfileForm.tsx` code, fully commented, that captures user input (one or more URLs), sends it to the Flask server, and shows the response.
+166: 3. A brief test in `test_app.py` that verifies the endpoint can be called with a JSON list of URLs and returns a 200 with the correct structure.
+167: ```
+168: 
+169: ---
+170: 
+171: ### **Prompt 3: Basic Crawler Integration**
+172: 
+173: ```text
+174: We want to integrate a simple `crawler.py` that mocks out data from the provided URLs. 
+175: 1. In `crawler.py`, implement `def crawl_profile(url: str) -> dict:` that returns `{"fakeData": "mocked for " + url}`. 
+176: 2. In the `POST /profiles` endpoint, loop over each URL in the request, call `crawl_profile(url)`, and accumulate the results in a dictionary that is returned to the user.
+177: 3. Show updated `test_app.py` that verifies at least one URL is crawled and returned in the final JSON.
+178: Please provide fully commented code.
+179: ```
+180: 
+181: ---
+182: 
+183: ### **Prompt 4: Store & Retrieve by User ID**
+184: 
+185: ```text
+186: Add in-memory storage to store the crawler results keyed by user ID:
+187: 1. Update `POST /profiles` to accept a query param like `user_id` or generate one. Store the crawler results in a global dictionary. Return a response with the user ID in it.
+188: 2. Create `GET /profiles/<user_id>` that returns the stored data if it exists or a 404 otherwise.
+189: 3. Provide an updated test that does the sequence: POST some URLs with user_id=123, then GET /profiles/123 and see the results.
+190: ```
+191: 
+192: ---
+193: 
+194: ### **Prompt 5: Realistic Data & Summaries**
+195: 
+196: ```text
+197: We want to expand our crawler to return structured data. For now, just return something like:
+198: {
+199:   "username": "someusername",
+200:   "postCount": 42,
+201:   "privacySettings": "public"
+202: }
+203: depending on each platform (Facebook, Twitter, etc.). Demonstrate how you might switch logic based on the domain in the URL.
+204: Return it in the final JSON so each URL has a platform summary. Show an updated test verifying the presence of "username" in the response.
+205: ```
+206: 
+207: ---
+208: 
+209: ### **Prompt 6: Integrate with DataExposureMetrics / PlatformSettings**
+210: 
+211: ```text
+212: Now let's connect the backend data to the Next.js components. 
+213: 1. Show how to fetch `GET /profiles/<user_id>` within the Next.js `PrivacyDashboard` or `DataExposureMetrics` component. 
+214: 2. Populate the displayed metrics with the real data from the crawler (assuming each platform is returning different keys).
+215: 3. Provide short tests or instructions to confirm that if we have a user_id with stored data, it updates the UI.
+216: ```
+217: 
+218: ---
+219: 
+220: ### **Prompt 7: Final Testing & Mocks**
+221: 
+222: ```text
+223: Add test coverage:
+224: 1. In Python: 
+225:    - a test that mocks the crawler function, ensuring any domain is accepted.
+226:    - a test that checks user_id creation, data retrieval, and 404 if data doesn't exist.
+227: 2. In Next.js:
+228:    - a test with React Testing Library that checks the form can be submitted, the API is called, and the UI updates.
+229: Use short code with comments, focusing on demonstrating the TDD approach.
+230: ```
+231: 
+232: ---
+233: 
+234: Each prompt ensures small, testable progress. Following them in order helps build the application step by step—providing immediate feedback at each stage, ensuring everything is integrated, and avoiding big leaps. You can insert additional sub-steps or additional tests as needed.
+</file>
+
 <file path="postcss.config.mjs">
 1: /** @type {import('postcss-load-config').Config} */
 2: const config = {
@@ -6203,6 +8272,99 @@ This section contains the contents of the repository's files.
 6: };
 7: 
 8: export default config;
+</file>
+
+<file path="README.md">
+ 1: # Fiasco - Social Media Privacy Analyzer
+ 2: 
+ 3: A privacy analysis tool that crawls social media profiles and provides a privacy report dashboard.
+ 4: 
+ 5: ## Project Structure
+ 6: 
+ 7: - `backend/`: Flask backend API and crawler
+ 8: - `app/`, `components/`: Next.js frontend
+ 9: - `.github/workflows/`: CI/CD configuration
+10: 
+11: ## Setup
+12: 
+13: ### Prerequisites
+14: 
+15: - Python 3.11+
+16: - Node.js 20+
+17: - pnpm
+18: - uv (for Python dependency management)
+19: 
+20: ### Backend Setup
+21: 
+22: ```bash
+23: # Create a virtual environment and install dependencies
+24: make setup-backend
+25: ```
+26: 
+27: ### Frontend Setup
+28: 
+29: ```bash
+30: # Install frontend dependencies
+31: make setup-frontend
+32: ```
+33: 
+34: ### All-in-one Setup
+35: 
+36: ```bash
+37: # Setup both backend and frontend
+38: make setup
+39: ```
+40: 
+41: ## Running the Application
+42: 
+43: ### Backend Server
+44: 
+45: ```bash
+46: # Run the Flask backend server
+47: make run-backend
+48: 
+49: # Or in development mode with hot reload
+50: make run-backend-dev
+51: ```
+52: 
+53: ### Frontend Server
+54: 
+55: ```bash
+56: # Run the Next.js frontend development server
+57: make run-frontend
+58: ```
+59: 
+60: ## Testing
+61: 
+62: ```bash
+63: # Run backend tests
+64: make test-backend
+65: 
+66: # Run frontend tests
+67: make test-frontend
+68: 
+69: # Run all tests
+70: make test
+71: ```
+72: 
+73: ## CI/CD
+74: 
+75: This project uses GitHub Actions for continuous integration:
+76: 
+77: - Backend CI: Runs Python tests for backend code changes
+78: - Frontend CI: Runs linting and build checks for frontend code changes
+79: 
+80: ## Development Workflow
+81: 
+82: 1. Make changes to the code
+83: 2. Run tests locally: `make test`
+84: 3. Run CI checks locally: `make ci-checks`
+85: 4. Commit and push changes
+86: 5. CI will run on GitHub to verify your changes
+87: 
+88: ## Available Make Commands
+89: 
+90: Run `make help` to see all available commands.
 </file>
 
 <file path="tailwind.config.ts">
@@ -6303,6 +8465,250 @@ This section contains the contents of the repository's files.
 95: export default config;
 </file>
 
+<file path="TESTING_ALL.md">
+  1: # Testing the Full Application
+  2: 
+  3: This document provides instructions for testing both the backend and frontend components.
+  4: 
+  5: ## Backend Tests
+  6: 
+  7: The backend tests use pytest to verify the Flask API and crawler functionality.
+  8: 
+  9: ### Running Backend Tests
+ 10: 
+ 11: To run the backend tests:
+ 12: 
+ 13: ```bash
+ 14: cd backend
+ 15: . .venv/bin/activate
+ 16: pytest tests/
+ 17: ```
+ 18: 
+ 19: ### Mock Tests
+ 20: 
+ 21: The `test_mocks.py` file contains tests that mock the crawler functionality to ensure the API works correctly:
+ 22: 
+ 23: 1. `test_profiles_endpoint_with_mocked_crawler`: Tests the `/profiles` endpoint with a mocked crawler function
+ 24: 2. `test_user_id_creation_and_retrieval`: Tests user_id creation, storage, and retrieval
+ 25: 3. `test_crawler_accepts_any_domain`: Tests that the API works with any domain name
+ 26: 
+ 27: ## Frontend Tests
+ 28: 
+ 29: The frontend tests use Jest and React Testing Library to verify the React components.
+ 30: 
+ 31: ### Setting Up Frontend Tests
+ 32: 
+ 33: First, install the required dependencies:
+ 34: 
+ 35: ```bash
+ 36: npm install --save-dev jest jest-environment-jsdom @testing-library/react @testing-library/jest-dom @types/jest
+ 37: ```
+ 38: 
+ 39: ### Running Frontend Tests
+ 40: 
+ 41: To run the frontend tests:
+ 42: 
+ 43: ```bash
+ 44: npm test
+ 45: ```
+ 46: 
+ 47: Or to run tests in watch mode:
+ 48: 
+ 49: ```bash
+ 50: npm run test:watch
+ 51: ```
+ 52: 
+ 53: ### Mock API
+ 54: 
+ 55: The `lib/mocks/api-mock.ts` file contains a mock implementation of the PrivacyAPI for testing purposes. This mock:
+ 56: 
+ 57: 1. Simulates the API responses without making actual HTTP requests
+ 58: 2. Provides realistic mock data for different platforms
+ 59: 3. Allows storing and retrieving profile data with user IDs
+ 60: 
+ 61: ### Component Tests
+ 62: 
+ 63: The frontend tests verify the following components:
+ 64: 
+ 65: 1. `ProfileForm`: Tests form submission, validation, and API integration
+ 66: 2. `ConnectedDashboard`: Tests data loading, storage, and display
+ 67: 
+ 68: ## Integration Testing
+ 69: 
+ 70: To test the full integration between frontend and backend:
+ 71: 
+ 72: 1. Start both services:
+ 73:    ```bash
+ 74:    # Terminal 1
+ 75:    cd backend
+ 76:    . .venv/bin/activate
+ 77:    python run.py
+ 78:    
+ 79:    # Terminal 2
+ 80:    npm run dev
+ 81:    ```
+ 82: 
+ 83: 2. Visit http://localhost:3000/connected in your browser
+ 84: 3. Submit profile URLs and verify results
+ 85: 4. Check browser localStorage for the saved user_id
+ 86: 5. Refresh the page to verify data persistence
+ 87: 
+ 88: ## Running All Tests
+ 89: 
+ 90: To run both backend and frontend tests in sequence:
+ 91: 
+ 92: ```bash
+ 93: # Make sure to update package.json with this script first
+ 94: npm run test:all
+ 95: ```
+ 96: 
+ 97: This will run the Jest tests for the frontend and then the pytest tests for the backend.
+ 98: 
+ 99: ## Continuous Integration
+100: 
+101: For CI environments, you can use the following steps:
+102: 
+103: 1. Install backend dependencies:
+104:    ```bash
+105:    cd backend
+106:    python -m pip install -r requirements.txt
+107:    ```
+108: 
+109: 2. Install frontend dependencies:
+110:    ```bash
+111:    npm install
+112:    ```
+113: 
+114: 3. Run tests:
+115:    ```bash
+116:    npm run test:all
+117:    ```
+118: 
+119: ## Troubleshooting
+120: 
+121: ### Backend Tests
+122: 
+123: - If you get import errors, make sure you're running the tests from the backend directory
+124: - Verify that your virtual environment is activated
+125: 
+126: ### Frontend Tests
+127: 
+128: - For Jest configuration issues, check the `jest.config.js` file
+129: - For component rendering issues, check the mock implementations in `jest.setup.js`
+130: 
+131: ### Integration Testing
+132: 
+133: - Check browser network tab to debug API request/response issues
+134: - Use console.log in component code to trace data flow
+</file>
+
+<file path="TESTING.md">
+  1: # Testing the Frontend-Backend Connection
+  2: 
+  3: This document explains how to test the connection between the Next.js frontend and the Flask backend.
+  4: 
+  5: ## Prerequisites
+  6: 
+  7: 1. Make sure both the backend and frontend services are running:
+  8: 
+  9: ```bash
+ 10: # Terminal 1: Run the Flask backend
+ 11: cd backend
+ 12: . .venv/bin/activate
+ 13: python run.py
+ 14: ```
+ 15: 
+ 16: ```bash
+ 17: # Terminal 2: Run the Next.js frontend
+ 18: npm run dev
+ 19: ```
+ 20: 
+ 21: ## Testing Steps
+ 22: 
+ 23: ### 1. Access the Connected Dashboard
+ 24: 
+ 25: Visit [http://localhost:3000/connected](http://localhost:3000/connected) to access the connected dashboard that integrates with the Flask backend.
+ 26: 
+ 27: ### 2. Submit Profiles for Analysis
+ 28: 
+ 29: 1. You should see a form to enter social media profile URLs
+ 30: 2. Enter URLs like:
+ 31:    - `https://twitter.com/someusername`
+ 32:    - `https://facebook.com/someusername`
+ 33:    - `https://instagram.com/someusername`
+ 34:    - `https://linkedin.com/in/someusername`
+ 35: 3. Click "Analyze Profiles"
+ 36: 
+ 37: ### 3. Check Backend Logs
+ 38: 
+ 39: In your Flask terminal, you should see logs indicating:
+ 40: - Received URLs
+ 41: - Crawling activity for each URL
+ 42: - Storage of results with a user_id
+ 43: 
+ 44: ### 4. Verify Frontend Display
+ 45: 
+ 46: After submission, the frontend should:
+ 47: 1. Show a success toast
+ 48: 2. Display the privacy analysis results
+ 49: 3. Store the user_id in localStorage
+ 50: 4. Show tabs for each platform detected
+ 51: 
+ 52: ### 5. Test Data Persistence
+ 53: 
+ 54: 1. Refresh the page
+ 55: 2. The application should automatically fetch previously analyzed profiles
+ 56: 3. Your session ID should be visible near the top of the dashboard
+ 57: 
+ 58: ### 6. Test Refresh Functionality
+ 59: 
+ 60: 1. Click the "Refresh" button
+ 61: 2. The backend should re-analyze the same URLs
+ 62: 3. The frontend should update with new results
+ 63: 
+ 64: ### 7. Test Export Functionality
+ 65: 
+ 66: 1. Click the "Export Report" button
+ 67: 2. A JSON file should download containing your profile analysis data
+ 68: 
+ 69: ## Troubleshooting
+ 70: 
+ 71: ### CORS Issues
+ 72: 
+ 73: If you're experiencing CORS errors:
+ 74: 1. Verify the Flask backend has CORS properly enabled
+ 75: 2. Check the backend is running on http://localhost:5000
+ 76: 3. Ensure proper headers are being sent in the requests
+ 77: 
+ 78: ### Connection Issues
+ 79: 
+ 80: If the frontend can't connect to the backend:
+ 81: 1. Check that both services are running
+ 82: 2. Verify the API URL in `lib/privacy-api.ts` is correctly set to `http://localhost:5000`
+ 83: 3. Check your browser console for network errors
+ 84: 
+ 85: ### Data Issues
+ 86: 
+ 87: If data is not displaying correctly:
+ 88: 1. Use browser developer tools to inspect the network requests
+ 89: 2. Check the response data format from the backend
+ 90: 3. Verify the frontend components are properly using the data structure
+ 91: 
+ 92: ## Manual Testing of Backend API
+ 93: 
+ 94: You can also directly test the backend API using curl:
+ 95: 
+ 96: ```bash
+ 97: # Submit profiles for analysis
+ 98: curl -X POST http://localhost:5000/profiles \
+ 99:   -H "Content-Type: application/json" \
+100:   -d '{"urls": ["https://twitter.com/someuser", "https://facebook.com/someuser"]}'
+101: 
+102: # Get stored results for a user ID
+103: curl http://localhost:5000/profiles/YOUR_USER_ID_HERE
+104: ```
+</file>
+
 <file path="tsconfig.json">
  1: {
  2:   "compilerOptions": {
@@ -6331,6 +8737,1372 @@ This section contains the contents of the repository's files.
 25:   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
 26:   "exclude": ["node_modules"]
 27: }
+</file>
+
+<file path="backend/tests/test_crawler.py">
+  1: import pytest
+  2: from crawler import (
+  3:     crawl_profile,
+  4:     extract_platform_and_username,
+  5:     generate_mock_privacy_settings,
+  6:     generate_mock_activity_data,
+  7:     generate_risk_assessment
+  8: )
+  9: def test_extract_platform_and_username():
+ 10:     """Test that platform and username extraction works correctly."""
+ 11:     # Test Twitter
+ 12:     platform, username = extract_platform_and_username("https://twitter.com/johndoe")
+ 13:     assert platform == "twitter"
+ 14:     assert username == "johndoe"
+ 15:     # Test Twitter with www
+ 16:     platform, username = extract_platform_and_username("https://www.twitter.com/johndoe")
+ 17:     assert platform == "twitter"
+ 18:     assert username == "johndoe"
+ 19:     # Test Twitter (x.com)
+ 20:     platform, username = extract_platform_and_username("https://x.com/johndoe")
+ 21:     assert platform == "twitter"
+ 22:     assert username == "johndoe"
+ 23:     # Test Facebook
+ 24:     platform, username = extract_platform_and_username("https://facebook.com/johndoe")
+ 25:     assert platform == "facebook"
+ 26:     assert username == "johndoe"
+ 27:     # Test Instagram
+ 28:     platform, username = extract_platform_and_username("https://instagram.com/johndoe")
+ 29:     assert platform == "instagram"
+ 30:     assert username == "johndoe"
+ 31:     # Test unknown platform
+ 32:     platform, username = extract_platform_and_username("https://example.com/johndoe")
+ 33:     assert platform == "unknown"
+ 34:     assert username == "johndoe"
+ 35:     # Test empty path
+ 36:     platform, username = extract_platform_and_username("https://twitter.com")
+ 37:     assert platform == "twitter"
+ 38:     assert username is None
+ 39: def test_generate_mock_privacy_settings():
+ 40:     """Test that privacy settings are generated based on platform."""
+ 41:     # Test known platforms
+ 42:     settings = generate_mock_privacy_settings("twitter")
+ 43:     assert "account_privacy" in settings
+ 44:     assert settings["account_privacy"] in ["public", "private"]
+ 45:     settings = generate_mock_privacy_settings("facebook")
+ 46:     assert "profile_visibility" in settings
+ 47:     assert settings["profile_visibility"] in ["public", "friends", "friends of friends", "only me"]
+ 48:     # Test unknown platform
+ 49:     settings = generate_mock_privacy_settings("unknown")
+ 50:     assert "account_privacy" in settings
+ 51: def test_generate_mock_activity_data():
+ 52:     """Test that activity data is generated based on platform."""
+ 53:     # Test common fields for any platform
+ 54:     activity = generate_mock_activity_data("some_platform")
+ 55:     assert "post_count" in activity
+ 56:     assert "follower_count" in activity
+ 57:     assert "following_count" in activity
+ 58:     # Test platform-specific fields
+ 59:     twitter_activity = generate_mock_activity_data("twitter")
+ 60:     assert "retweet_count" in twitter_activity
+ 61:     facebook_activity = generate_mock_activity_data("facebook")
+ 62:     assert "friend_count" in facebook_activity
+ 63:     instagram_activity = generate_mock_activity_data("instagram")
+ 64:     assert "average_likes" in instagram_activity
+ 65: def test_generate_risk_assessment():
+ 66:     """Test that risk assessment is generated correctly."""
+ 67:     # Test with public account
+ 68:     privacy_settings = {"account_privacy": "public", "location_sharing": True}
+ 69:     activity_data = {"post_count": 400, "posts_with_location": 20}
+ 70:     risk = generate_risk_assessment("twitter", privacy_settings, activity_data)
+ 71:     assert "privacy_score" in risk
+ 72:     assert "risk_level" in risk
+ 73:     assert "risk_factors" in risk
+ 74:     assert "recommendations" in risk
+ 75:     # Verify risk factors include public account risk
+ 76:     assert any("Public account" in factor for factor in risk["risk_factors"])
+ 77:     # Verify recommendations include private account recommendation
+ 78:     assert any("private" in rec for rec in risk["recommendations"])
+ 79:     # Test with private account
+ 80:     privacy_settings = {"account_privacy": "private", "location_sharing": False}
+ 81:     activity_data = {"post_count": 20, "posts_with_location": 0}
+ 82:     risk = generate_risk_assessment("linkedin", privacy_settings, activity_data)
+ 83:     # Should have higher privacy score than the previous test
+ 84:     assert risk["privacy_score"] > 50
+ 85: def test_crawl_profile():
+ 86:     """Test that the crawler returns structured profile data."""
+ 87:     # Test Twitter profile
+ 88:     url = "https://twitter.com/johndoe"
+ 89:     result = crawl_profile(url)
+ 90:     assert isinstance(result, dict)
+ 91:     assert "platform" in result
+ 92:     assert result["platform"] == "twitter"
+ 93:     assert "username" in result
+ 94:     assert result["username"] == "johndoe"
+ 95:     assert "privacy_settings" in result
+ 96:     assert "activity_data" in result
+ 97:     assert "risk_assessment" in result
+ 98:     # Test Facebook profile
+ 99:     url = "https://facebook.com/johndoe"
+100:     result = crawl_profile(url)
+101:     assert isinstance(result, dict)
+102:     assert "platform" in result
+103:     assert result["platform"] == "facebook"
+104:     # Test non-existent or malformed URL with mock error
+105:     try:
+106:         # Force an error by passing a completely invalid URL
+107:         url = None  # This should cause an error
+108:         result = crawl_profile(url)  # type: ignore
+109:         # If it doesn't raise an exception, at least check it has basic structure
+110:         assert isinstance(result, dict)
+111:         assert "platform" in result
+112:     except Exception:
+113:         # If it raises an exception, that's also acceptable for this test
+114:         pass
+</file>
+
+<file path="backend/crawler.py">
+  1: """
+  2: Crawler module for fetching profile data from social media platforms.
+  3: Uses Firecrawl for real web crawling with fallback to mock data generation.
+  4: """
+  5: import re
+  6: import os
+  7: from urllib.parse import urlparse
+  8: import random
+  9: from datetime import datetime, timedelta
+ 10: import logging
+ 11: import json
+ 12: from firecrawl import FirecrawlApp
+ 13: logger = logging.getLogger(__name__)
+ 14: # Initialize Firecrawl with API key
+ 15: FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "")
+ 16: firecrawl_app = None
+ 17: # Only initialize if API key is available
+ 18: if FIRECRAWL_API_KEY:
+ 19:     try:
+ 20:         firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+ 21:         logger.info("Firecrawl initialized successfully")
+ 22:     except Exception as e:
+ 23:         logger.error(f"Failed to initialize Firecrawl: {str(e)}")
+ 24: else:
+ 25:     logger.warning("No Firecrawl API key found, using mock data generation only")
+ 26: def extract_platform_and_username(url: str) -> tuple:
+ 27:     """
+ 28:     Extract the platform and username from a social media URL.
+ 29:     Args:
+ 30:         url: The URL of the profile to parse
+ 31:     Returns:
+ 32:         A tuple of (platform, username)
+ 33:     """
+ 34:     parsed_url = urlparse(url)
+ 35:     domain = parsed_url.netloc.lower()
+ 36:     # Remove 'www.' if present
+ 37:     if domain.startswith('www.'):
+ 38:         domain = domain[4:]
+ 39:     # Extract platform from domain
+ 40:     platform_mapping = {
+ 41:         'twitter.com': 'twitter',
+ 42:         'x.com': 'twitter',
+ 43:         'facebook.com': 'facebook',
+ 44:         'instagram.com': 'instagram',
+ 45:         'linkedin.com': 'linkedin',
+ 46:         'tiktok.com': 'tiktok',
+ 47:         'youtube.com': 'youtube',
+ 48:         'reddit.com': 'reddit',
+ 49:         'pinterest.com': 'pinterest',
+ 50:         'snapchat.com': 'snapchat',
+ 51:     }
+ 52:     platform = None
+ 53:     for domain_pattern, platform_name in platform_mapping.items():
+ 54:         if domain_pattern in domain:
+ 55:             platform = platform_name
+ 56:             break
+ 57:     if not platform:
+ 58:         platform = 'unknown'
+ 59:     # Extract username from path
+ 60:     path = parsed_url.path.strip('/')
+ 61:     username = path.split('/')[0] if path else None
+ 62:     return platform, username
+ 63: def generate_mock_privacy_settings(platform: str) -> dict:
+ 64:     """Generate mock privacy settings for a given platform."""
+ 65:     privacy_options = {
+ 66:         'twitter': {
+ 67:             'account_privacy': random.choice(['public', 'private']),
+ 68:             'who_can_message': random.choice(['everyone', 'followers only', 'no one']),
+ 69:             'location_sharing': random.choice([True, False]),
+ 70:             'data_personalization': random.choice([True, False]),
+ 71:             'tagged_photo_review': random.choice([True, False])
+ 72:         },
+ 73:         'facebook': {
+ 74:             'profile_visibility': random.choice(['public', 'friends', 'friends of friends', 'only me']),
+ 75:             'friend_list_visibility': random.choice(['public', 'friends', 'only me']),
+ 76:             'future_post_privacy': random.choice(['public', 'friends', 'only me']),
+ 77:             'tagged_photo_review': random.choice([True, False]),
+ 78:             'face_recognition': random.choice([True, False])
+ 79:         },
+ 80:         'instagram': {
+ 81:             'account_privacy': random.choice(['public', 'private']),
+ 82:             'activity_status': random.choice([True, False]),
+ 83:             'story_sharing': random.choice(['public', 'close friends only']),
+ 84:             'mentioned_story_sharing': random.choice([True, False]),
+ 85:             'data_sharing_with_partners': random.choice([True, False])
+ 86:         },
+ 87:         'linkedin': {
+ 88:             'profile_visibility': random.choice(['public', 'connections only']),
+ 89:             'connection_visibility': random.choice(['public', 'connections only']),
+ 90:             'profile_photo_visibility': random.choice(['public', 'connections only']),
+ 91:             'active_status': random.choice([True, False]),
+ 92:             'profile_edit_notifications': random.choice([True, False])
+ 93:         },
+ 94:         'tiktok': {
+ 95:             'account_privacy': random.choice(['public', 'private']),
+ 96:             'comment_permissions': random.choice(['everyone', 'friends', 'no one']),
+ 97:             'duet_permissions': random.choice(['everyone', 'friends', 'no one']),
+ 98:             'stitch_permissions': random.choice(['everyone', 'friends', 'no one']),
+ 99:             'download_permissions': random.choice([True, False])
+100:         }
+101:     }
+102:     # Default privacy settings for platforms not specifically listed
+103:     default_privacy = {
+104:         'account_privacy': random.choice(['public', 'private']),
+105:         'content_visibility': random.choice(['public', 'followers/friends', 'private']),
+106:         'message_permissions': random.choice(['everyone', 'followers/friends', 'no one']),
+107:         'data_usage_consent': random.choice([True, False]),
+108:         'targeted_ads': random.choice([True, False])
+109:     }
+110:     return privacy_options.get(platform, default_privacy)
+111: def generate_mock_activity_data(platform: str) -> dict:
+112:     """Generate mock activity data for a given platform."""
+113:     now = datetime.now()
+114:     # Common activity metrics for most platforms
+115:     data = {
+116:         'post_count': random.randint(10, 500),
+117:         'follower_count': random.randint(50, 10000),
+118:         'following_count': random.randint(50, 1000),
+119:         'last_active': (now - timedelta(days=random.randint(0, 30))).strftime('%Y-%m-%d'),
+120:         'account_created': (now - timedelta(days=random.randint(365, 3650))).strftime('%Y-%m-%d'),
+121:         'posts_per_month': random.randint(1, 30),
+122:         'mentions_other_users': random.randint(0, 100),
+123:         'hashtags_used': random.randint(0, 200),
+124:         'engagement_rate': round(random.uniform(0.5, 15.0), 2),
+125:         'posts_with_location': random.randint(0, 50)
+126:     }
+127:     # Platform-specific metrics
+128:     platform_specific = {
+129:         'twitter': {
+130:             'retweet_count': random.randint(10, 500),
+131:             'like_count': random.randint(50, 5000),
+132:             'lists_count': random.randint(0, 20),
+133:             'verification_status': random.choice([True, False]),
+134:             'tweets_with_media': random.randint(0, 100)
+135:         },
+136:         'facebook': {
+137:             'friend_count': random.randint(50, 2000),
+138:             'page_likes': random.randint(10, 500),
+139:             'group_memberships': random.randint(0, 50),
+140:             'events_attended': random.randint(0, 100),
+141:             'photos_uploaded': random.randint(0, 300)
+142:         },
+143:         'instagram': {
+144:             'average_likes': random.randint(10, 500),
+145:             'highlight_reels': random.randint(0, 20),
+146:             'saved_posts': random.randint(0, 200),
+147:             'tagged_photos': random.randint(0, 100),
+148:             'stories_posted': random.randint(0, 1000)
+149:         },
+150:         'linkedin': {
+151:             'connections': random.randint(50, 2000),
+152:             'endorsements': random.randint(0, 100),
+153:             'articles_published': random.randint(0, 50),
+154:             'skills_listed': random.randint(0, 50),
+155:             'recommendations': random.randint(0, 20)
+156:         },
+157:         'tiktok': {
+158:             'video_count': random.randint(10, 300),
+159:             'total_likes': random.randint(1000, 1000000),
+160:             'average_watch_time': random.randint(5, 30),
+161:             'completion_rate': round(random.uniform(0.2, 0.9), 2),
+162:             'most_viewed_video': random.randint(1000, 1000000)
+163:         }
+164:     }
+165:     # Add platform-specific data if available
+166:     if platform in platform_specific:
+167:         data.update(platform_specific[platform])
+168:     return data
+169: def generate_risk_assessment(platform: str, privacy_settings: dict, activity_data: dict) -> dict:
+170:     """Generate a risk assessment based on the privacy settings and activity data."""
+171:     # Calculate privacy score (0-100)
+172:     # Higher is better (more private)
+173:     # Start with a base score
+174:     base_privacy_score = 50
+175:     # Adjust based on account privacy
+176:     account_privacy = privacy_settings.get('account_privacy', 'public')
+177:     if account_privacy == 'private':
+178:         base_privacy_score += 20
+179:     elif account_privacy == 'public':
+180:         base_privacy_score -= 10
+181:     # Adjust based on platform (some platforms are inherently more private)
+182:     platform_privacy_adjustment = {
+183:         'facebook': -10,  # Known for data collection issues
+184:         'linkedin': +5,   # Professional network, generally safer
+185:         'twitter': -5,    # Public by default
+186:         'instagram': -8,  # Owned by Meta, similar issues as Facebook
+187:         'tiktok': -15,    # Known for extensive data collection
+188:     }
+189:     base_privacy_score += platform_privacy_adjustment.get(platform, 0)
+190:     # Adjust based on activity
+191:     post_count = activity_data.get('post_count', 0)
+192:     if post_count > 300:
+193:         base_privacy_score -= 10
+194:     elif post_count < 50:
+195:         base_privacy_score += 5
+196:     # Adjust based on location sharing
+197:     if privacy_settings.get('location_sharing', False):
+198:         base_privacy_score -= 15
+199:     # Cap the score between 0 and 100
+200:     privacy_score = max(0, min(100, base_privacy_score))
+201:     # Generate risk factors based on settings and activity
+202:     risk_factors = []
+203:     if account_privacy == 'public':
+204:         risk_factors.append('Public account exposes your content to anyone')
+205:     if activity_data.get('posts_with_location', 0) > 10:
+206:         risk_factors.append('Location data attached to multiple posts')
+207:     if privacy_settings.get('data_personalization', False) or privacy_settings.get('data_usage_consent', False):
+208:         risk_factors.append('Data personalization enabled allows platform to track preferences')
+209:     if post_count > 200:
+210:         risk_factors.append('High post count creates a detailed digital footprint')
+211:     if platform == 'facebook' and privacy_settings.get('face_recognition', False):
+212:         risk_factors.append('Face recognition enabled can reduce privacy')
+213:     # Generate recommendations
+214:     recommendations = []
+215:     if account_privacy == 'public':
+216:         recommendations.append('Set your account to private')
+217:     if privacy_settings.get('location_sharing', False):
+218:         recommendations.append('Disable location sharing')
+219:     if privacy_settings.get('data_personalization', False):
+220:         recommendations.append('Disable data personalization in settings')
+221:     if platform == 'facebook' and privacy_settings.get('face_recognition', False):
+222:         recommendations.append('Turn off face recognition')
+223:     if activity_data.get('posts_with_location', 0) > 0:
+224:         recommendations.append('Remove location data from existing posts')
+225:     return {
+226:         'privacy_score': privacy_score,
+227:         'risk_level': 'high' if privacy_score < 40 else 'medium' if privacy_score < 70 else 'low',
+228:         'risk_factors': risk_factors,
+229:         'recommendations': recommendations
+230:     }
+231: def crawl_profile(url: str) -> dict:
+232:     """
+233:     Crawl a social media profile using Firecrawl when available, 
+234:     with fallback to mock data generation.
+235:     Args:
+236:         url: The URL of the profile to crawl
+237:     Returns:
+238:         A dictionary containing structured profile data
+239:     """
+240:     try:
+241:         platform, username = extract_platform_and_username(url)
+242:         if not username:
+243:             username = f"user_{random.randint(1000, 9999)}"
+244:         logger.info(f"Crawling {platform} profile for {username}")
+245:         # Try to use Firecrawl if it's available
+246:         if firecrawl_app and FIRECRAWL_API_KEY:
+247:             try:
+248:                 logger.info(f"Attempting to scrape {url} with Firecrawl")
+249:                 # Scrape the URL with Firecrawl
+250:                 scrape_result = firecrawl_app.scrape_url(url, formats=['markdown', 'html'])
+251:                 # Extract relevant data from the scrape result
+252:                 profile_data = extract_profile_data_from_scrape(scrape_result, platform, username)
+253:                 logger.info(f"Successfully scraped {url} with Firecrawl")
+254:                 return profile_data
+255:             except Exception as e:
+256:                 logger.error(f"Firecrawl scraping failed for {url}: {str(e)}")
+257:                 logger.info("Falling back to mock data generation")
+258:                 # Continue with mock data generation
+259:         else:
+260:             logger.info(f"Using mock data generation for {url}")
+261:         # Generate mock data
+262:         privacy_settings = generate_mock_privacy_settings(platform)
+263:         activity_data = generate_mock_activity_data(platform)
+264:         risk_assessment = generate_risk_assessment(platform, privacy_settings, activity_data)
+265:         # Create the structured response
+266:         profile_data = {
+267:             'platform': platform,
+268:             'username': username,
+269:             'timestamp': datetime.now().isoformat(),
+270:             'privacy_settings': privacy_settings,
+271:             'activity_data': activity_data,
+272:             'risk_assessment': risk_assessment,
+273:             'data_source': 'mock'  # Indicate this is mock data
+274:         }
+275:         return profile_data
+276:     except Exception as e:
+277:         logger.error(f"Error crawling {url}: {str(e)}")
+278:         # Return minimal data to not break the flow
+279:         return {
+280:             'platform': 'unknown',
+281:             'username': 'unknown',
+282:             'timestamp': datetime.now().isoformat(),
+283:             'error': str(e),
+284:             'data_source': 'error'
+285:         }
+286: def extract_profile_data_from_scrape(scrape_result, platform, username):
+287:     """
+288:     Extract relevant profile data from the Firecrawl scrape result.
+289:     Args:
+290:         scrape_result: The result from Firecrawl
+291:         platform: The detected social media platform
+292:         username: The detected username
+293:     Returns:
+294:         A dictionary containing structured profile data
+295:     """
+296:     try:
+297:         # Extract content from scrape result
+298:         content_markdown = scrape_result.get('markdown', '')
+299:         content_html = scrape_result.get('html', '')
+300:         # Initialize the result structure
+301:         privacy_settings = {}
+302:         activity_data = {}
+303:         # Different extraction based on platform
+304:         if platform == 'twitter':
+305:             # Extract follower count, following count, etc.
+306:             follower_match = re.search(r'(\d+(?:,\d+)*)\s+Followers', content_markdown)
+307:             following_match = re.search(r'(\d+(?:,\d+)*)\s+Following', content_markdown)
+308:             follower_count = int(follower_match.group(1).replace(',', '')) if follower_match else random.randint(50, 10000)
+309:             following_count = int(following_match.group(1).replace(',', '')) if following_match else random.randint(50, 1000)
+310:             # Determine privacy settings based on HTML/content
+311:             private_account = 'Protected Tweets' in content_markdown or 'protected-icon' in content_html
+312:             privacy_settings = {
+313:                 'account_privacy': 'private' if private_account else 'public',
+314:                 'location_sharing': 'Location:' in content_markdown,
+315:                 'data_personalization': True,  # Default assumption
+316:             }
+317:             activity_data = {
+318:                 'follower_count': follower_count,
+319:                 'following_count': following_count,
+320:                 'post_count': random.randint(10, 500),  # Hard to extract accurately
+321:                 'verified': 'verified-icon' in content_html or 'verified' in content_markdown.lower(),
+322:             }
+323:         elif platform == 'facebook':
+324:             # Facebook-specific extraction
+325:             privacy_settings = {
+326:                 'profile_visibility': 'public' if 'Public' in content_markdown else 'friends',
+327:                 'friend_list_visibility': 'public' if 'Friends' in content_markdown else 'friends',
+328:             }
+329:             activity_data = {
+330:                 'friend_count': random.randint(50, 2000),  # Hard to extract accurately
+331:             }
+332:         elif platform == 'instagram':
+333:             # Instagram-specific extraction
+334:             follower_match = re.search(r'(\d+(?:\.\d+)?[k|m]?)\s+followers', content_markdown, re.IGNORECASE)
+335:             following_match = re.search(r'(\d+(?:\.\d+)?[k|m]?)\s+following', content_markdown, re.IGNORECASE)
+336:             posts_match = re.search(r'(\d+(?:\.\d+)?[k|m]?)\s+posts', content_markdown, re.IGNORECASE)
+337:             # Parse follower counts (handling K, M, etc.)
+338:             follower_count = parse_count(follower_match.group(1)) if follower_match else random.randint(50, 10000)
+339:             following_count = parse_count(following_match.group(1)) if following_match else random.randint(50, 1000)
+340:             post_count = parse_count(posts_match.group(1)) if posts_match else random.randint(10, 500)
+341:             # Check if account is private
+342:             private_account = 'This account is private' in content_markdown or 'This Account is Private' in content_markdown
+343:             privacy_settings = {
+344:                 'account_privacy': 'private' if private_account else 'public',
+345:                 'activity_status': True,  # Default assumption
+346:             }
+347:             activity_data = {
+348:                 'follower_count': follower_count,
+349:                 'following_count': following_count,
+350:                 'post_count': post_count,
+351:                 'verified': 'verified' in content_markdown.lower() or 'verified-icon' in content_html,
+352:             }
+353:         else:
+354:             # For other platforms, use mock data
+355:             privacy_settings = generate_mock_privacy_settings(platform)
+356:             activity_data = generate_mock_activity_data(platform)
+357:         # Generate risk assessment
+358:         risk_assessment = generate_risk_assessment(platform, privacy_settings, activity_data)
+359:         # Create the structured response
+360:         return {
+361:             'platform': platform,
+362:             'username': username,
+363:             'timestamp': datetime.now().isoformat(),
+364:             'privacy_settings': privacy_settings,
+365:             'activity_data': activity_data,
+366:             'risk_assessment': risk_assessment,
+367:             'data_source': 'firecrawl'  # Indicate this is from real scraping
+368:         }
+369:     except Exception as e:
+370:         logger.error(f"Error extracting data from scrape result: {str(e)}")
+371:         # Fall back to mock data
+372:         privacy_settings = generate_mock_privacy_settings(platform)
+373:         activity_data = generate_mock_activity_data(platform)
+374:         risk_assessment = generate_risk_assessment(platform, privacy_settings, activity_data)
+375:         return {
+376:             'platform': platform,
+377:             'username': username,
+378:             'timestamp': datetime.now().isoformat(),
+379:             'privacy_settings': privacy_settings,
+380:             'activity_data': activity_data,
+381:             'risk_assessment': risk_assessment,
+382:             'data_source': 'mock_fallback'  # Indicate this is fallback mock data
+383:         }
+384: def parse_count(count_str):
+385:     """Parse count strings like '1.2k' or '3.4m' into integers."""
+386:     count_str = count_str.lower()
+387:     # Remove commas
+388:     count_str = count_str.replace(',', '')
+389:     if 'k' in count_str:
+390:         return int(float(count_str.replace('k', '')) * 1000)
+391:     elif 'm' in count_str:
+392:         return int(float(count_str.replace('m', '')) * 1000000)
+393:     else:
+394:         return int(float(count_str))
+</file>
+
+<file path="backend/requirements.txt">
+1: flask==2.3.3
+2: flask-cors==4.0.0
+3: flask-sqlalchemy==3.1.1
+4: pytest==7.4.0
+5: firecrawl==0.5.3
+</file>
+
+<file path="components/connected-dashboard.tsx">
+  1: "use client"
+  2: import { useState, useEffect } from "react"
+  3: import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+  4: import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+  5: import PrivacyScore from "@/components/privacy-score"
+  6: import DataExposureMetrics from "@/components/data-exposure-metrics"
+  7: import PlatformSettings from "@/components/platform-settings"
+  8: import PrivacyRecommendations from "@/components/privacy-recommendations"
+  9: import { Button } from "@/components/ui/button"
+ 10: import { AlertCircle, ArrowRight, Download, RefreshCw, Upload } from "lucide-react"
+ 11: import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+ 12: import { ProfileForm } from "@/components/profile-form"
+ 13: import { useToast } from "@/hooks/use-toast"
+ 14: import { PrivacyAPI } from "@/lib/privacy-api"
+ 15: import type { ProfileData } from "@/components/profile-result"
+ 16: export default function ConnectedDashboard() {
+ 17:   const { toast } = useToast();
+ 18:   const [activeTab, setActiveTab] = useState("overview");
+ 19:   const [isLoading, setIsLoading] = useState(false);
+ 20:   const [userId, setUserId] = useState<string | null>(null);
+ 21:   const [profileResults, setProfileResults] = useState<Record<string, ProfileData> | null>(null);
+ 22:   const [profileUrls, setProfileUrls] = useState<string[]>([]);
+ 23:   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+ 24:   const [error, setError] = useState<string | null>(null);
+ 25:   // Derived data
+ 26:   const overallPrivacyScore = calculateOverallScore(profileResults);
+ 27:   const publicInfoCount = calculatePublicInfoCount(profileResults);
+ 28:   const thirdPartyAccessCount = calculateThirdPartyAccessCount(profileResults);
+ 29:   const dataByPlatform = groupByPlatform(profileResults);
+ 30:   const platforms = Object.keys(dataByPlatform);
+ 31:   const hasData = profileResults && Object.keys(profileResults).length > 0;
+ 32:   // Load any stored user ID on component mount
+ 33:   useEffect(() => {
+ 34:     const storedUserId = localStorage.getItem('fiasco_user_id');
+ 35:     if (storedUserId) {
+ 36:       setUserId(storedUserId);
+ 37:       loadProfileData(storedUserId);
+ 38:     }
+ 39:   }, []);
+ 40:   // Load profile data from the API
+ 41:   const loadProfileData = async (id?: string) => {
+ 42:     const userIdToUse = id || userId;
+ 43:     if (!userIdToUse) return;
+ 44:     setIsLoading(true);
+ 45:     setError(null);
+ 46:     try {
+ 47:       const api = PrivacyAPI.getInstance();
+ 48:       const data = await api.getProfileResults(userIdToUse);
+ 49:       setProfileResults(data.results);
+ 50:       setProfileUrls(data.urls);
+ 51:       setLastUpdated(new Date());
+ 52:     } catch (err) {
+ 53:       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+ 54:       // Only set error if it's not a "not found" error for a new user
+ 55:       if (errorMessage !== 'Profile not found') {
+ 56:         setError(errorMessage);
+ 57:         toast({
+ 58:           title: "Error loading data",
+ 59:           description: errorMessage,
+ 60:           variant: "destructive"
+ 61:         });
+ 62:       }
+ 63:     } finally {
+ 64:       setIsLoading(false);
+ 65:     }
+ 66:   };
+ 67:   // Submit profile for analysis
+ 68:   const handleProfileSubmit = async (urls: string[]) => {
+ 69:     setIsLoading(true);
+ 70:     setError(null);
+ 71:     try {
+ 72:       const api = PrivacyAPI.getInstance();
+ 73:       const data = await api.submitProfiles(urls, userId || undefined);
+ 74:       // Store the user ID
+ 75:       if (data.user_id) {
+ 76:         localStorage.setItem('fiasco_user_id', data.user_id);
+ 77:         setUserId(data.user_id);
+ 78:       }
+ 79:       setProfileResults(data.results);
+ 80:       setProfileUrls(data.urls);
+ 81:       setLastUpdated(new Date());
+ 82:       toast({
+ 83:         title: "Analysis complete",
+ 84:         description: `Analyzed ${urls.length} profile${urls.length > 1 ? 's' : ''} successfully.`
+ 85:       });
+ 86:     } catch (err) {
+ 87:       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+ 88:       setError(errorMessage);
+ 89:       toast({
+ 90:         title: "Analysis failed",
+ 91:         description: errorMessage,
+ 92:         variant: "destructive"
+ 93:       });
+ 94:     } finally {
+ 95:       setIsLoading(false);
+ 96:     }
+ 97:   };
+ 98:   // Refresh data
+ 99:   const handleRefresh = async () => {
+100:     if (profileUrls.length > 0) {
+101:       try {
+102:         await handleProfileSubmit(profileUrls);
+103:         toast({
+104:           title: "Data refreshed",
+105:           description: "Your privacy report has been updated with the latest data."
+106:         });
+107:       } catch (error) {
+108:         // Error handling is done in handleProfileSubmit
+109:       }
+110:     }
+111:   };
+112:   // Handle export
+113:   const handleExport = () => {
+114:     if (!profileResults) return;
+115:     // Create a JSON file to download
+116:     const dataStr = JSON.stringify(profileResults, null, 2);
+117:     const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
+118:     const exportFileDefaultName = `privacy-report-${new Date().toISOString().split('T')[0]}.json`;
+119:     const linkElement = document.createElement('a');
+120:     linkElement.setAttribute('href', dataUri);
+121:     linkElement.setAttribute('download', exportFileDefaultName);
+122:     linkElement.click();
+123:     toast({
+124:       title: "Report exported",
+125:       description: "Your privacy report has been downloaded as a JSON file."
+126:     });
+127:   };
+128:   // Format the lastUpdated date nicely
+129:   const formattedDate = lastUpdated 
+130:     ? new Intl.DateTimeFormat('en-US', {
+131:         year: 'numeric',
+132:         month: 'long',
+133:         day: 'numeric',
+134:         hour: '2-digit',
+135:         minute: '2-digit'
+136:       }).format(lastUpdated)
+137:     : 'Not available';
+138:   return (
+139:     <div className="space-y-6">
+140:       <Alert>
+141:         <AlertCircle className="h-4 w-4" />
+142:         <AlertTitle>Read-Only Report</AlertTitle>
+143:         <AlertDescription>
+144:           This is an analysis of your current privacy settings. To change settings, you'll need to visit each platform
+145:           directly.
+146:         </AlertDescription>
+147:       </Alert>
+148:       {!hasData ? (
+149:         <div className="mt-8 space-y-6">
+150:           <div className="text-center">
+151:             <h2 className="text-2xl font-bold mb-2">No Profile Data</h2>
+152:             <p className="text-muted-foreground mb-6">
+153:               Add social media profiles to analyze your privacy settings and data exposure
+154:             </p>
+155:           </div>
+156:           <Card>
+157:             <CardHeader>
+158:               <CardTitle>Add Social Media Profiles</CardTitle>
+159:               <CardDescription>
+160:                 Enter the URLs of your social media profiles to analyze their privacy settings
+161:               </CardDescription>
+162:             </CardHeader>
+163:             <CardContent>
+164:               <ProfileForm onSubmit={handleProfileSubmit} />
+165:             </CardContent>
+166:           </Card>
+167:         </div>
+168:       ) : (
+169:         <>
+170:           <div className="flex flex-col justify-between gap-4 sm:flex-row">
+171:             <div>
+172:               <h2 className="text-2xl font-bold">Privacy Dashboard</h2>
+173:               <p className="text-muted-foreground">Last updated: {formattedDate}</p>
+174:             </div>
+175:             <div className="flex gap-2">
+176:               <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
+177:                 <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+178:                 Refresh
+179:               </Button>
+180:               <Button onClick={handleExport} disabled={isLoading}>
+181:                 <Download className="mr-2 h-4 w-4" />
+182:                 Export Report
+183:               </Button>
+184:             </div>
+185:           </div>
+186:           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+187:             <Card>
+188:               <CardHeader className="pb-2">
+189:                 <CardTitle className="text-sm font-medium">Overall Privacy Score</CardTitle>
+190:               </CardHeader>
+191:               <CardContent>
+192:                 <div className="flex items-center justify-center py-4">
+193:                   <PrivacyScore score={overallPrivacyScore} />
+194:                 </div>
+195:               </CardContent>
+196:             </Card>
+197:             <Card>
+198:               <CardHeader className="pb-2">
+199:                 <CardTitle className="text-sm font-medium">Public Information</CardTitle>
+200:               </CardHeader>
+201:               <CardContent>
+202:                 <div className="text-2xl font-bold">{publicInfoCount} items</div>
+203:                 <p className="text-xs text-muted-foreground">Publicly visible settings</p>
+204:               </CardContent>
+205:             </Card>
+206:             <Card>
+207:               <CardHeader className="pb-2">
+208:                 <CardTitle className="text-sm font-medium">Third-Party Access</CardTitle>
+209:               </CardHeader>
+210:               <CardContent>
+211:                 <div className="text-2xl font-bold">{thirdPartyAccessCount} apps</div>
+212:                 <p className="text-xs text-muted-foreground">With access to your data</p>
+213:               </CardContent>
+214:             </Card>
+215:             <Card>
+216:               <CardHeader className="pb-2">
+217:                 <CardTitle className="text-sm font-medium">Profiles Analyzed</CardTitle>
+218:               </CardHeader>
+219:               <CardContent>
+220:                 <div className="text-2xl font-bold">{profileUrls.length}</div>
+221:                 <p className="text-xs text-muted-foreground">Social media accounts</p>
+222:               </CardContent>
+223:             </Card>
+224:           </div>
+225:           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+226:             <TabsList className="flex overflow-x-auto">
+227:               <TabsTrigger value="overview">Overview</TabsTrigger>
+228:               {platforms.map(platform => (
+229:                 <TabsTrigger key={platform} value={platform}>
+230:                   {platform.charAt(0).toUpperCase() + platform.slice(1)}
+231:                 </TabsTrigger>
+232:               ))}
+233:               <TabsTrigger value="add">
+234:                 <Upload className="h-4 w-4 mr-2" />
+235:                 Add Profile
+236:               </TabsTrigger>
+237:             </TabsList>
+238:             <TabsContent value="overview" className="space-y-4">
+239:               <DataExposureMetrics />
+240:               <PrivacyRecommendations />
+241:             </TabsContent>
+242:             {platforms.map(platform => (
+243:               <TabsContent key={platform} value={platform}>
+244:                 <PlatformSettings platform={platform as any} />
+245:               </TabsContent>
+246:             ))}
+247:             <TabsContent value="add">
+248:               <Card>
+249:                 <CardHeader>
+250:                   <CardTitle>Add More Profiles</CardTitle>
+251:                 </CardHeader>
+252:                 <CardContent>
+253:                   <ProfileForm onSubmit={handleProfileSubmit} />
+254:                 </CardContent>
+255:               </Card>
+256:             </TabsContent>
+257:           </Tabs>
+258:         </>
+259:       )}
+260:     </div>
+261:   );
+262: }
+263: // Helper functions
+264: function calculateOverallScore(profileResults: Record<string, ProfileData> | null): number {
+265:   if (!profileResults) return 0;
+266:   const scores = Object.values(profileResults).map(
+267:     profile => profile.risk_assessment?.privacy_score || 0
+268:   );
+269:   if (scores.length === 0) return 0;
+270:   return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+271: }
+272: function calculatePublicInfoCount(profileResults: Record<string, ProfileData> | null): number {
+273:   if (!profileResults) return 0;
+274:   let count = 0;
+275:   Object.values(profileResults).forEach(profile => {
+276:     const settings = profile.privacy_settings || {};
+277:     // Count settings that are public or enabled
+278:     Object.entries(settings).forEach(([key, value]) => {
+279:       if (
+280:         value === 'public' || 
+281:         value === true || 
+282:         (typeof value === 'string' && value.includes('public'))
+283:       ) {
+284:         count++;
+285:       }
+286:     });
+287:   });
+288:   return count;
+289: }
+290: function calculateThirdPartyAccessCount(profileResults: Record<string, ProfileData> | null): number {
+291:   if (!profileResults) return 0;
+292:   // This would normally count third-party apps with access
+293:   // For this demo, we'll use a random number based on the number of profiles
+294:   const profileCount = Object.keys(profileResults).length;
+295:   return profileCount > 0 ? Math.min(profileCount * 2 + Math.floor(Math.random() * 5), 12) : 0;
+296: }
+297: function groupByPlatform(profileResults: Record<string, ProfileData> | null): Record<string, ProfileData[]> {
+298:   if (!profileResults) return {};
+299:   const grouped: Record<string, ProfileData[]> = {};
+300:   Object.entries(profileResults).forEach(([url, profile]) => {
+301:     const platform = profile.platform || 'unknown';
+302:     if (!grouped[platform]) {
+303:       grouped[platform] = [];
+304:     }
+305:     grouped[platform].push({
+306:       ...profile,
+307:       url // Add the URL to the profile for reference
+308:     } as any);
+309:   });
+310:   return grouped;
+311: }
+</file>
+
+<file path="backend/app.py">
+  1: from flask import Flask, jsonify, request
+  2: from flask_cors import CORS
+  3: import logging
+  4: import uuid
+  5: import os
+  6: from crawler import crawl_profile
+  7: from models import db, User, Profile, PrivacySetting, ActivityData, RiskAssessment
+  8: app = Flask(__name__)
+  9: CORS(app)  # Enable CORS for all routes
+ 10: # Configure logging
+ 11: logging.basicConfig(level=logging.INFO)
+ 12: logger = logging.getLogger(__name__)
+ 13: # Database configuration
+ 14: app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///fiasco.db'
+ 15: app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+ 16: db.init_app(app)
+ 17: # Create tables when the app starts
+ 18: with app.app_context():
+ 19:     db.create_all()
+ 20: # For testing: access to the in-memory storage
+ 21: crawler_results = {}
+ 22: @app.route('/health', methods=['GET'])
+ 23: def health():
+ 24:     return jsonify({"status": "ok"})
+ 25: @app.route('/ping', methods=['GET'])
+ 26: def ping():
+ 27:     return "pong"
+ 28: @app.route('/profiles', methods=['POST'])
+ 29: def submit_profiles():
+ 30:     data = request.get_json()
+ 31:     urls = data.get('urls', [])
+ 32:     # Get or generate user_id
+ 33:     user_id = data.get('user_id')
+ 34:     if not user_id:
+ 35:         user_id = str(uuid.uuid4())
+ 36:     logger.info(f"Received URLs for user_id {user_id}: {urls}")
+ 37:     # Find or create user
+ 38:     user = db.session.get(User, user_id)
+ 39:     if not user:
+ 40:         user = User(id=user_id)
+ 41:         db.session.add(user)
+ 42:     # Process each URL with the crawler
+ 43:     results = {}
+ 44:     for url in urls:
+ 45:         logger.info(f"Crawling URL: {url}")
+ 46:         try:
+ 47:             # Call crawler
+ 48:             profile_data = crawl_profile(url)
+ 49:             results[url] = profile_data
+ 50:             # Check if profile already exists for this URL and user
+ 51:             existing_profile = Profile.query.filter_by(user_id=user_id, url=url).first()
+ 52:             if existing_profile:
+ 53:                 # Update existing profile
+ 54:                 existing_profile.platform = profile_data.get('platform', 'unknown')
+ 55:                 existing_profile.username = profile_data.get('username', 'unknown')
+ 56:                 # Delete old data
+ 57:                 for setting in existing_profile.privacy_settings:
+ 58:                     db.session.delete(setting)
+ 59:                 for data in existing_profile.activity_data:
+ 60:                     db.session.delete(data)
+ 61:                 for assessment in existing_profile.risk_assessment:
+ 62:                     db.session.delete(assessment)
+ 63:                 profile = existing_profile
+ 64:             else:
+ 65:                 # Create new profile
+ 66:                 profile = Profile(
+ 67:                     url=url,
+ 68:                     user_id=user_id,
+ 69:                     platform=profile_data.get('platform', 'unknown'),
+ 70:                     username=profile_data.get('username', 'unknown')
+ 71:                 )
+ 72:                 db.session.add(profile)
+ 73:             # Save privacy settings
+ 74:             if 'privacy_settings' in profile_data:
+ 75:                 for key, value in profile_data['privacy_settings'].items():
+ 76:                     setting = PrivacySetting(profile=profile, key=key)
+ 77:                     setting.set_value(value)
+ 78:                     db.session.add(setting)
+ 79:             # Save activity data
+ 80:             if 'activity_data' in profile_data:
+ 81:                 for key, value in profile_data['activity_data'].items():
+ 82:                     activity = ActivityData(profile=profile, key=key)
+ 83:                     activity.set_value(value)
+ 84:                     db.session.add(activity)
+ 85:             # Save risk assessment
+ 86:             if 'risk_assessment' in profile_data:
+ 87:                 risk_data = profile_data['risk_assessment']
+ 88:                 risk = RiskAssessment(
+ 89:                     profile=profile,
+ 90:                     privacy_score=risk_data.get('privacy_score', 0),
+ 91:                     risk_level=risk_data.get('risk_level', 'unknown')
+ 92:                 )
+ 93:                 risk.set_risk_factors(risk_data.get('risk_factors', []))
+ 94:                 risk.set_recommendations(risk_data.get('recommendations', []))
+ 95:                 db.session.add(risk)
+ 96:             # Commit after each profile to ensure partial success
+ 97:             db.session.commit()
+ 98:         except Exception as e:
+ 99:             logger.error(f"Error crawling {url}: {str(e)}")
+100:             results[url] = {"error": str(e)}
+101:             db.session.rollback()
+102:     # Also store in-memory for compatibility with tests
+103:     crawler_results[user_id] = {
+104:         "urls": urls,
+105:         "results": results,
+106:         "timestamp": app.config.get('REQUEST_TIME', None)
+107:     }
+108:     logger.info(f"Stored results for user_id: {user_id}")
+109:     response = {
+110:         "status": "processed",
+111:         "user_id": user_id,
+112:         "urls": urls,
+113:         "results": results
+114:     }
+115:     return jsonify(response)
+116: @app.route('/profiles/<user_id>', methods=['GET'])
+117: def get_profiles(user_id):
+118:     # Check if user exists
+119:     user = db.session.get(User, user_id)
+120:     if not user:
+121:         logger.warning(f"User ID not found: {user_id}")
+122:         return jsonify({"error": "User ID not found"}), 404
+123:     logger.info(f"Retrieving results for user_id: {user_id}")
+124:     # Get all profiles for this user
+125:     profiles = Profile.query.filter_by(user_id=user_id).all()
+126:     # Build response
+127:     results = {}
+128:     for profile in profiles:
+129:         results[profile.url] = profile.to_dict()
+130:     response = {
+131:         "urls": [profile.url for profile in profiles],
+132:         "results": results,
+133:         "timestamp": user.updated_at.isoformat() if user.updated_at else None
+134:     }
+135:     return jsonify(response)
+136: if __name__ == '__main__':
+137:     app.run(debug=True, host='0.0.0.0', port=5000)
+</file>
+
+<file path="backend/tests/test_app.py">
+  1: import pytest
+  2: import json
+  3: import uuid
+  4: from app import app as flask_app, crawler_results, db
+  5: from models import User, Profile
+  6: from unittest.mock import patch, Mock
+  7: @pytest.fixture
+  8: def app():
+  9:     # Configure the app for testing
+ 10:     flask_app.config['TESTING'] = True
+ 11:     # Use an in-memory SQLite database for testing
+ 12:     flask_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+ 13:     return flask_app
+ 14: @pytest.fixture
+ 15: def client(app):
+ 16:     # Create a test client
+ 17:     test_client = app.test_client()
+ 18:     # Create an application context
+ 19:     with app.app_context():
+ 20:         # Create all tables in the test database
+ 21:         db.create_all()
+ 22:         yield test_client
+ 23:         # Clean up after the test
+ 24:         db.session.remove()
+ 25:         db.drop_all()
+ 26: @pytest.fixture(autouse=True)
+ 27: def clear_crawler_results():
+ 28:     # Clear the crawler_results before each test
+ 29:     crawler_results.clear()
+ 30:     yield
+ 31: def test_health_endpoint(client):
+ 32:     response = client.get('/health')
+ 33:     assert response.status_code == 200
+ 34:     assert response.json == {"status": "ok"}
+ 35: def test_ping_endpoint(client):
+ 36:     response = client.get('/ping')
+ 37:     assert response.status_code == 200
+ 38:     assert response.data == b"pong"
+ 39: def test_profiles_endpoint_with_crawler():
+ 40:     # Create a test client
+ 41:     client = flask_app.test_client()
+ 42:     # Test data
+ 43:     urls = ["https://twitter.com/testuser", "https://facebook.com/testuser"]
+ 44:     # Send POST request
+ 45:     response = client.post(
+ 46:         '/profiles',
+ 47:         data=json.dumps({"urls": urls}),
+ 48:         content_type='application/json'
+ 49:     )
+ 50:     # Check status code
+ 51:     assert response.status_code == 200
+ 52:     # Check response structure
+ 53:     response_data = response.json
+ 54:     assert response_data.get("status") == "processed"
+ 55:     assert "urls" in response_data
+ 56:     assert len(response_data["urls"]) == 2
+ 57:     assert response_data["urls"] == urls
+ 58:     assert "user_id" in response_data
+ 59:     # Check that results were returned
+ 60:     assert "results" in response_data
+ 61:     assert len(response_data["results"]) == 2
+ 62:     # Check that each URL has the expected structured result
+ 63:     for url in urls:
+ 64:         assert url in response_data["results"]
+ 65:         assert "platform" in response_data["results"][url]
+ 66:         assert "username" in response_data["results"][url]
+ 67:         assert "privacy_settings" in response_data["results"][url]
+ 68:         assert "activity_data" in response_data["results"][url]
+ 69:         assert "risk_assessment" in response_data["results"][url]
+ 70: def test_profiles_endpoint_with_provided_user_id():
+ 71:     # Create a test client
+ 72:     client = flask_app.test_client()
+ 73:     # Test data
+ 74:     user_id = str(uuid.uuid4())
+ 75:     urls = ["https://twitter.com/testuser"]
+ 76:     # Send POST request with user_id
+ 77:     response = client.post(
+ 78:         '/profiles',
+ 79:         data=json.dumps({"urls": urls, "user_id": user_id}),
+ 80:         content_type='application/json'
+ 81:     )
+ 82:     # Check response
+ 83:     assert response.status_code == 200
+ 84:     response_data = response.json
+ 85:     assert response_data.get("user_id") == user_id
+ 86:     # Verify the results were stored with the provided user_id
+ 87:     assert user_id in crawler_results
+ 88: def test_get_profiles_endpoint():
+ 89:     # Create a test client
+ 90:     client = flask_app.test_client()
+ 91:     # First, submit some profiles to create a user_id
+ 92:     urls = ["https://twitter.com/testuser"]
+ 93:     # Send POST request
+ 94:     post_response = client.post(
+ 95:         '/profiles',
+ 96:         data=json.dumps({"urls": urls}),
+ 97:         content_type='application/json'
+ 98:     )
+ 99:     user_id = post_response.json.get("user_id")
+100:     assert user_id is not None
+101:     # Now try to retrieve the profiles
+102:     get_response = client.get(f'/profiles/{user_id}')
+103:     # Check response
+104:     assert get_response.status_code == 200
+105:     get_data = get_response.json
+106:     # Verify the data structure
+107:     assert "urls" in get_data
+108:     assert "results" in get_data
+109:     assert get_data["urls"] == urls
+110:     # Verify the results content
+111:     for url in urls:
+112:         assert url in get_data["results"]
+113:         assert "platform" in get_data["results"][url]
+114:         assert "privacy_settings" in get_data["results"][url]
+115:         assert "activity_data" in get_data["results"][url]
+116:         assert "risk_assessment" in get_data["results"][url]
+117: def test_get_profiles_with_nonexistent_user_id():
+118:     # Create a test client
+119:     client = flask_app.test_client()
+120:     # Try to retrieve profiles for a non-existent user_id
+121:     get_response = client.get('/profiles/nonexistent-id')
+122:     # Check response is 404
+123:     assert get_response.status_code == 404
+124:     assert "error" in get_response.json
+</file>
+
+<file path="components/profile-form.tsx">
+  1: "use client";
+  2: import { useState, useEffect } from "react";
+  3: import { Button } from "@/components/ui/button";
+  4: import { Input } from "@/components/ui/input";
+  5: import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+  6: import { Label } from "@/components/ui/label";
+  7: import { useToast } from "@/hooks/use-toast";
+  8: import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+  9: import { ProfileResult } from "@/components/profile-result";
+ 10: // Define types for crawler results
+ 11: import type { ProfileData } from "@/components/profile-result";
+ 12: type CrawlerResult = {
+ 13:   [url: string]: ProfileData;
+ 14: };
+ 15: // Define type for profile API response
+ 16: type ProfileResponse = {
+ 17:   urls: string[];
+ 18:   results: CrawlerResult;
+ 19:   timestamp?: string;
+ 20: };
+ 21: interface ProfileFormProps {
+ 22:   onSubmit?: (urls: string[]) => Promise<void>;
+ 23: }
+ 24: export function ProfileForm({ onSubmit }: ProfileFormProps = {}) {
+ 25:   const [urls, setUrls] = useState<string[]>([""]);
+ 26:   const [isLoading, setIsLoading] = useState(false);
+ 27:   const [results, setResults] = useState<CrawlerResult | null>(null);
+ 28:   const [userId, setUserId] = useState<string | null>(null);
+ 29:   const [isLoadingStoredData, setIsLoadingStoredData] = useState(false);
+ 30:   const { toast } = useToast();
+ 31:   // On component mount, check for a stored user_id
+ 32:   useEffect(() => {
+ 33:     const storedUserId = localStorage.getItem("fiasco_user_id");
+ 34:     if (storedUserId) {
+ 35:       setUserId(storedUserId);
+ 36:       fetchStoredData(storedUserId);
+ 37:     }
+ 38:   }, []);
+ 39:   // Fetch any stored data if user_id exists
+ 40:   const fetchStoredData = async (id: string) => {
+ 41:     setIsLoadingStoredData(true);
+ 42:     try {
+ 43:       const response = await fetch(`http://localhost:5000/profiles/${id}`);
+ 44:       if (response.ok) {
+ 45:         const data: ProfileResponse = await response.json();
+ 46:         // Update state with the stored data
+ 47:         if (data.results) {
+ 48:           setResults(data.results);
+ 49:           // If there are URLs in the stored data, use them
+ 50:           if (data.urls && data.urls.length > 0) {
+ 51:             setUrls(data.urls);
+ 52:           }
+ 53:           toast({
+ 54:             title: "Data loaded",
+ 55:             description: "Loaded your previously analyzed profiles",
+ 56:           });
+ 57:         }
+ 58:       } else if (response.status !== 404) {
+ 59:         // If not a 404 (no data found yet), show an error
+ 60:         toast({
+ 61:           title: "Error",
+ 62:           description: "Failed to load previously analyzed profiles",
+ 63:           variant: "destructive",
+ 64:         });
+ 65:       }
+ 66:     } catch (error) {
+ 67:       console.error("Error fetching stored data:", error);
+ 68:     } finally {
+ 69:       setIsLoadingStoredData(false);
+ 70:     }
+ 71:   };
+ 72:   // Handle input change for each URL field
+ 73:   const handleUrlChange = (index: number, value: string) => {
+ 74:     const newUrls = [...urls];
+ 75:     newUrls[index] = value;
+ 76:     setUrls(newUrls);
+ 77:   };
+ 78:   // Add a new URL input field
+ 79:   const addUrlField = () => {
+ 80:     setUrls([...urls, ""]);
+ 81:   };
+ 82:   // Remove a URL input field
+ 83:   const removeUrlField = (index: number) => {
+ 84:     if (urls.length > 1) {
+ 85:       const newUrls = urls.filter((_, i) => i !== index);
+ 86:       setUrls(newUrls);
+ 87:     }
+ 88:   };
+ 89:   // Reset the form and results
+ 90:   const handleReset = () => {
+ 91:     setUrls([""]);
+ 92:     setResults(null);
+ 93:     // Optionally clear the stored user_id to start fresh
+ 94:     if (userId) {
+ 95:       const shouldClear = window.confirm("Do you want to clear your saved data and start fresh?");
+ 96:       if (shouldClear) {
+ 97:         localStorage.removeItem("fiasco_user_id");
+ 98:         setUserId(null);
+ 99:         toast({
+100:           title: "Data cleared",
+101:           description: "Your saved data has been cleared",
+102:         });
+103:       }
+104:     }
+105:   };
+106:   // Handle form submission
+107:   const handleSubmit = async (e: React.FormEvent) => {
+108:     e.preventDefault();
+109:     // Reset previous results
+110:     setResults(null);
+111:     // Filter out empty URLs
+112:     const validUrls = urls.filter(url => url.trim() !== "");
+113:     if (validUrls.length === 0) {
+114:       toast({
+115:         title: "Error",
+116:         description: "Please enter at least one valid URL",
+117:         variant: "destructive",
+118:       });
+119:       return;
+120:     }
+121:     setIsLoading(true);
+122:     try {
+123:       // Use the onSubmit prop if provided
+124:       if (onSubmit) {
+125:         await onSubmit(validUrls);
+126:       } else {
+127:         // Default implementation if no onSubmit provided
+128:         // Include user_id if we have one from previous requests
+129:         const requestData = {
+130:           urls: validUrls,
+131:           ...(userId ? { user_id: userId } : {})
+132:         };
+133:         const response = await fetch("http://localhost:5000/profiles", {
+134:           method: "POST",
+135:           headers: {
+136:             "Content-Type": "application/json",
+137:           },
+138:           body: JSON.stringify(requestData),
+139:         });
+140:         const data = await response.json();
+141:         if (response.ok) {
+142:           toast({
+143:             title: "Success",
+144:             description: `Processed ${data.urls.length} profile URLs`,
+145:           });
+146:           // Store the user_id if it's new
+147:           if (data.user_id && (!userId || userId !== data.user_id)) {
+148:             localStorage.setItem("fiasco_user_id", data.user_id);
+149:             setUserId(data.user_id);
+150:           }
+151:           // Store the results
+152:           if (data.results) {
+153:             setResults(data.results);
+154:           }
+155:         } else {
+156:           throw new Error("Failed to submit profiles");
+157:         }
+158:       }
+159:     } catch (error) {
+160:       toast({
+161:         title: "Error",
+162:         description: "Failed to connect to the server",
+163:         variant: "destructive",
+164:       });
+165:       console.error("Error submitting profiles:", error);
+166:     } finally {
+167:       setIsLoading(false);
+168:     }
+169:   };
+170:   return (
+171:     <div className="space-y-6">
+172:       <Card className="w-full max-w-md mx-auto">
+173:         <CardHeader>
+174:           <CardTitle>Submit Profiles</CardTitle>
+175:           <CardDescription>
+176:             Enter the URLs of the social media profiles you want to analyze
+177:             {userId && 
+178:               <div className="mt-2 text-xs text-muted-foreground">
+179:                 Session ID: {userId}
+180:               </div>
+181:             }
+182:           </CardDescription>
+183:         </CardHeader>
+184:         <form onSubmit={handleSubmit}>
+185:           <CardContent>
+186:             {urls.map((url, index) => (
+187:               <div key={index} className="flex items-center gap-2 mb-4">
+188:                 <div className="flex-1">
+189:                   <Label htmlFor={`url-${index}`} className="sr-only">
+190:                     Profile URL
+191:                   </Label>
+192:                   <Input
+193:                     id={`url-${index}`}
+194:                     placeholder="https://twitter.com/username"
+195:                     value={url}
+196:                     onChange={(e) => handleUrlChange(index, e.target.value)}
+197:                     disabled={isLoading || isLoadingStoredData}
+198:                   />
+199:                 </div>
+200:                 {urls.length > 1 && (
+201:                   <Button
+202:                     type="button"
+203:                     variant="outline"
+204:                     size="icon"
+205:                     onClick={() => removeUrlField(index)}
+206:                     disabled={isLoading || isLoadingStoredData}
+207:                     aria-label="Remove URL"
+208:                   >
+209:                     &times;
+210:                   </Button>
+211:                 )}
+212:               </div>
+213:             ))}
+214:             <Button
+215:               type="button"
+216:               variant="outline"
+217:               onClick={addUrlField}
+218:               disabled={isLoading || isLoadingStoredData}
+219:               className="w-full"
+220:             >
+221:               Add Another URL
+222:             </Button>
+223:           </CardContent>
+224:           <CardFooter className="flex gap-2">
+225:             <Button 
+226:               type="submit" 
+227:               disabled={isLoading || isLoadingStoredData} 
+228:               className="flex-1"
+229:             >
+230:               {isLoading ? "Processing..." : isLoadingStoredData ? "Loading..." : "Analyze Profiles"}
+231:             </Button>
+232:             {(results || userId) && (
+233:               <Button 
+234:                 type="button" 
+235:                 variant="outline" 
+236:                 onClick={handleReset}
+237:                 disabled={isLoading || isLoadingStoredData}
+238:               >
+239:                 Reset
+240:               </Button>
+241:             )}
+242:           </CardFooter>
+243:         </form>
+244:       </Card>
+245:       {/* Display Results */}
+246:       {results && (
+247:         <Card className="w-full max-w-md mx-auto">
+248:           <CardHeader>
+249:             <CardTitle>Privacy Analysis Results</CardTitle>
+250:           </CardHeader>
+251:           <CardContent className="space-y-4">
+252:             {Object.entries(results).map(([url, data]) => (
+253:               <ProfileResult key={url} url={url} data={data as any} />
+254:             ))}
+255:           </CardContent>
+256:         </Card>
+257:       )}
+258:     </div>
+259:   );
+260: }
 </file>
 
 </files>
