@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import logging
+from crawler import crawl_profile
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -24,9 +25,21 @@ def submit_profiles():
     
     logger.info(f"Received URLs: {urls}")
     
+    # Process each URL with the crawler
+    results = {}
+    for url in urls:
+        logger.info(f"Crawling URL: {url}")
+        try:
+            profile_data = crawl_profile(url)
+            results[url] = profile_data
+        except Exception as e:
+            logger.error(f"Error crawling {url}: {str(e)}")
+            results[url] = {"error": str(e)}
+    
     response = {
-        "status": "received",
-        "urls": urls
+        "status": "processed",
+        "urls": urls,
+        "results": results
     }
     
     return jsonify(response)
