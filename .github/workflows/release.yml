@@ -1,0 +1,55 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Create Release Notes
+        id: release_notes
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          
+          # Get the tag before the latest one
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$LATEST_TAG"^)
+          
+          # If this is the first tag, use the initial commit
+          if [ $? -ne 0 ]; then
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          
+          # Generate changelog
+          echo "## Changes in $LATEST_TAG" > changelog.md
+          echo "" >> changelog.md
+          git log "$PREVIOUS_TAG..$LATEST_TAG" --pretty=format:"* %s" --reverse | grep -v "Merge pull request" >> changelog.md
+          echo "" >> changelog.md
+          
+          # Replace newlines for GitHub Actions output
+          CHANGELOG=$(cat changelog.md)
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: ${{ steps.release_notes.outputs.changelog }}
+          draft: false
+          prerelease: false
