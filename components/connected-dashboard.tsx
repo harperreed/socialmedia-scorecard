@@ -185,7 +185,7 @@ export default function ConnectedDashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ProfileForm />
+              <ProfileForm onSubmit={handleProfileSubmit} />
             </CardContent>
           </Card>
         </div>
@@ -279,7 +279,7 @@ export default function ConnectedDashboard() {
                   <CardTitle>Add More Profiles</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ProfileForm />
+                  <ProfileForm onSubmit={handleProfileSubmit} />
                 </CardContent>
               </Card>
             </TabsContent>

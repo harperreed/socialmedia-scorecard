@@ -23,7 +23,11 @@ type ProfileResponse = {
   timestamp?: string;
 };
 
-export function ProfileForm() {
+interface ProfileFormProps {
+  onSubmit?: (urls: string[]) => Promise<void>;
+}
+
+export function ProfileForm({ onSubmit }: ProfileFormProps = {}) {
   const [urls, setUrls] = useState<string[]>([""]);
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<CrawlerResult | null>(null);
@@ -139,40 +143,46 @@ export function ProfileForm() {
     setIsLoading(true);
 
     try {
-      // Include user_id if we have one from previous requests
-      const requestData = {
-        urls: validUrls,
-        ...(userId ? { user_id: userId } : {})
-      };
-
-      const response = await fetch("http://localhost:5000/profiles", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestData),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast({
-          title: "Success",
-          description: `Processed ${data.urls.length} profile URLs`,
-        });
-        
-        // Store the user_id if it's new
-        if (data.user_id && (!userId || userId !== data.user_id)) {
-          localStorage.setItem("fiasco_user_id", data.user_id);
-          setUserId(data.user_id);
-        }
-        
-        // Store the results
-        if (data.results) {
-          setResults(data.results);
-        }
+      // Use the onSubmit prop if provided
+      if (onSubmit) {
+        await onSubmit(validUrls);
       } else {
-        throw new Error("Failed to submit profiles");
+        // Default implementation if no onSubmit provided
+        // Include user_id if we have one from previous requests
+        const requestData = {
+          urls: validUrls,
+          ...(userId ? { user_id: userId } : {})
+        };
+
+        const response = await fetch("http://localhost:5000/profiles", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestData),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          toast({
+            title: "Success",
+            description: `Processed ${data.urls.length} profile URLs`,
+          });
+          
+          // Store the user_id if it's new
+          if (data.user_id && (!userId || userId !== data.user_id)) {
+            localStorage.setItem("fiasco_user_id", data.user_id);
+            setUserId(data.user_id);
+          }
+          
+          // Store the results
+          if (data.results) {
+            setResults(data.results);
+          }
+        } else {
+          throw new Error("Failed to submit profiles");
+        }
       }
     } catch (error) {
       toast({
